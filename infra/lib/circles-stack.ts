@@ -70,12 +70,22 @@ export class CirclesStack extends Stack {
       removalPolicy: RemovalPolicy.DESTROY,
     });
 
+    const circlesInvitationsTable = new dynamodb.Table(this, 'CircleInvitationsTable', {
+      tableName: 'CircleInvitations',
+      partitionKey: {
+        name: 'invitationId',
+        type: dynamodb.AttributeType.STRING,
+      },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      timeToLiveAttribute: 'expiresAt',
+      removalPolicy: RemovalPolicy.DESTROY, // OK for dev; consider RETAIN in prod
+    });
 
     // --- Lambda Function (API backend) ---
     const apiLambda = new lambda.Function(this, 'CirclesApiLambda', {
       runtime: lambda.Runtime.NODEJS_20_X,
       handler: 'circles-api-handler.handler',
-      code: lambda.Code.fromAsset('lambdas'),
+      code: lambda.Code.fromAsset('../lambdas'),
       environment: {
         TABLE_NAME: table.tableName,                       // messages
         CIRCLES_TABLE_NAME: circlesMetaTable.tableName,   // circles metadata
@@ -88,6 +98,9 @@ export class CirclesStack extends Stack {
     table.grantReadWriteData(apiLambda);
     circlesMetaTable.grantReadWriteData(apiLambda);
     circleMembershipsTable.grantReadWriteData(apiLambda);
+    circlesInvitationsTable.grantReadWriteData(apiLambda);
+
+    apiLambda.addEnvironment('INVITATIONS_TABLE_NAME', circlesInvitationsTable.tableName);
 
     // --- API Gateway (REST API for Circles) ---
     const api = new apigateway.RestApi(this, 'CirclesApi', {
@@ -175,12 +188,31 @@ export class CirclesStack extends Stack {
     const circlesConfigResource = circlesResource.addResource('config');
     circlesConfigResource.addMethod('GET', lambdaIntegration, methodOptions);
 
+    // POST /api/circles/{circleId}/invitations  -> create invitation for a circle
+    const circleIdResource = circlesResource.addResource('{circleId}');
+    const circleInvitationsResource = circleIdResource.addResource('invitations');
+    circleInvitationsResource.addMethod('POST', lambdaIntegration, methodOptions);
+
+    // POST /api/circles/invitations/accept  -> accept an invitation
+    const invitationsResource = circlesResource.addResource('invitations');
+    const invitationsAcceptResource = invitationsResource.addResource('accept');
+    invitationsAcceptResource.addMethod('POST', lambdaIntegration, methodOptions);
 
     circlesResource.addCorsPreflight({
       allowOrigins: ['https://circles.behrens-hub.com'], // or '*' while experimenting
       allowMethods: ['GET', 'POST', 'OPTIONS'],
       allowHeaders: ['Content-Type', 'Authorization'],
     });
+
+    // /api/stats → analytics endpoint (authenticated)
+    const statsResource = apiBaseResource.addResource('stats');
+    statsResource.addMethod('GET', lambdaIntegration, methodOptions);
+    statsResource.addCorsPreflight({
+      allowOrigins: ['https://circles.behrens-hub.com'],
+      allowMethods: ['GET', 'OPTIONS'],
+      allowHeaders: ['Content-Type', 'Authorization'],
+    });
+
 
     // Base execute-api hostname for CloudFront origin
     const apiDomain = `${api.restApiId}.execute-api.${this.region}.amazonaws.com`;
