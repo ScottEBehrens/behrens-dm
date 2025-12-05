@@ -12,6 +12,7 @@ import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 import * as wafv2 from 'aws-cdk-lib/aws-wafv2';
 import * as cognito from 'aws-cdk-lib/aws-cognito';
+import * as iam from 'aws-cdk-lib/aws-iam';
 
 export interface CirclesStackProps extends StackProps {}
 
@@ -90,6 +91,10 @@ export class CirclesStack extends Stack {
         TABLE_NAME: table.tableName,                       // messages
         CIRCLES_TABLE_NAME: circlesMetaTable.tableName,   // circles metadata
         CIRCLE_MEMBERSHIPS_TABLE_NAME: circleMembershipsTable.tableName, // memberships
+        INVITATIONS_TABLE_NAME: circlesInvitationsTable.tableName,
+        BEDROCK_MODEL_ID: 'anthropic.claude-3-haiku-20240307-v1:0',
+        // optional but nice to be explicit:
+        // BEDROCK_REGION: 'us-east-1',
       },
       timeout: Duration.seconds(10),
     });
@@ -100,7 +105,22 @@ export class CirclesStack extends Stack {
     circleMembershipsTable.grantReadWriteData(apiLambda);
     circlesInvitationsTable.grantReadWriteData(apiLambda);
 
-    apiLambda.addEnvironment('INVITATIONS_TABLE_NAME', circlesInvitationsTable.tableName);
+    // // Allow Lambda to call Bedrock
+    // apiLambda.addToRolePolicy(
+    //   new iam.PolicyStatement({
+    //     actions: ['bedrock:InvokeModel'],
+    //     resources: ['*'], // you can tighten to specific model ARN later
+    //   })
+    // );
+    apiLambda.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: [
+          'bedrock:InvokeModel',
+          'bedrock:InvokeModelWithResponseStream',
+        ],
+        resources: ['*'], // you can tighten to specific model ARNs later
+      }),
+    );
 
     // --- API Gateway (REST API for Circles) ---
     const api = new apigateway.RestApi(this, 'CirclesApi', {
@@ -182,6 +202,7 @@ export class CirclesStack extends Stack {
       authorizationType: apigateway.AuthorizationType.COGNITO,
     };
 
+    // /api/circles (ANY – list/post messages, etc.)
     circlesResource.addMethod('ANY', lambdaIntegration, methodOptions);
 
     // /api/circles/config → returns circles the user belongs to
@@ -197,6 +218,15 @@ export class CirclesStack extends Stack {
     const invitationsResource = circlesResource.addResource('invitations');
     const invitationsAcceptResource = invitationsResource.addResource('accept');
     invitationsAcceptResource.addMethod('POST', lambdaIntegration, methodOptions);
+
+    // GET /api/circles/members → list members of a circle
+    const circlesMembersResource = circlesResource.addResource('members');
+    circlesMembersResource.addMethod('GET', lambdaIntegration, methodOptions);
+
+    // --- /api/prompts (POST) ---
+    // Bedrock-backed prompt suggestions for the currently selected circle
+    const promptsResource = apiBaseResource.addResource('prompts');
+    promptsResource.addMethod('POST', lambdaIntegration, methodOptions);
 
     circlesResource.addCorsPreflight({
       allowOrigins: ['https://circles.behrens-hub.com'], // or '*' while experimenting

@@ -1,181 +1,184 @@
-# Circles – Family Messaging Demo
+# Circles – Serverless Family Messaging, Invitations & AI-Generated Prompts
 
-Circles is a small serverless product I built to demonstrate how I design, secure, and deliver cloud-native web applications on AWS. It models a simple “family circles” messaging system with a modern authentication flow, fine-grained authorization, and a clean SPA experience.
+Circles is a fully serverless, cloud-native messaging and family-engagement application demonstrating modern AWS design patterns.  
+It includes authenticated messaging, invitations, analytics, and **AI-generated conversation starters** powered by Amazon Bedrock.
 
-The project exercises the full browser → CDN → API → data-store pipeline, centered around Cognito-backed JWT auth, API Gateway authorizers, and backend-enforced permissions.
+👉 **Live Demo:** https://circles.behrens-hub.com  
+👉 **Portfolio Page:** https://scott.behrens-hub.com/circles
 
-Live demo: https://circles.behrens-hub.com
+---
 
-## Overview
+## 🌄 Overview
 
-Circles is a lightweight messaging app that uses:
+Circles is designed as a compact but complete demonstration of cloud engineering capabilities:
 
-- Frontend: static HTML/JS (no framework) hosted on S3
-- Delivery: CloudFront CDN on a custom domain
-- API: API Gateway + AWS Lambda (Node.js 20)
-- Authorization: Cognito Hosted UI + User Pool + JWT + API authorizer
-- Database: DynamoDB for messages, users, and circle membership
-- Domain: circles.behrens-hub.com via Route 53 + ACM
+- Identity & Access Management (Cognito HostedUI + token handling)
+- Secure serverless APIs (API Gateway + Lambda)
+- DynamoDB data modeling  
+- Role-based authorization via membership records  
+- Invitation onboarding system  
+- Analytics endpoints  
+- On-demand AI prompt generation with Bedrock  
+- SPA frontend delivered via CloudFront + S3 (zero dependencies)
 
-The goal:
-A clean, production-grade demonstration of how I design cloud architectures using serverless, identity, and zero-trust principles.
+---
 
-## Architecture
+# 📷 Screenshots
 
-### Frontend (S3 + CloudFront + Custom Domain)
+> Replace these with real screenshots once available.
 
-- SPA served from a private S3 bucket via an OAI.
-- CloudFront handles:
-  - / → S3 SPA
-  - /api/* → API Gateway REST API
-- Custom domain + HTTPS handled by:
-  - Route 53 DNS
-  - ACM certificate (us-east-1 for CloudFront)
+### 🔐 Login
+![Login Placeholder](docs/screenshots/login.png)
 
-### Backend (API Gateway + Lambda)
+### 💬 Messaging
+![Messaging Placeholder](docs/screenshots/messages.png)
 
-API Gateway (REST) exposes:
+### 🎟️ Invitations
+![Invites Placeholder](docs/screenshots/invite.png)
 
-| Route | Method | Description |
-|-------|--------|-------------|
-| /api/circles | GET | List messages in a circle |
-| /api/circles | POST | Create a message |
-| /api/circles/config | GET | Return circles the current user belongs to |
+### 📊 Analytics
+![Analytics Placeholder](docs/screenshots/analytics.png)
 
-### Cognito Authorizer
+### 🤖 AI Prompts
+![AI Prompts Placeholder](docs/screenshots/ai-prompts.png)
 
-- Validates JWT (id_token) sent in Authorization: Bearer <token>
-- Injects decoded claims into event.requestContext.authorizer
-- Lambda uses the JWT’s sub and email/name to determine identity
+---
 
-## Lambda (Node.js 20)
+# 🧱 Architecture
 
-- Uses AWS SDK v3 (@aws-sdk/client-dynamodb + lib-dynamodb)
-- Implements:
-  - Message reads/writes
-  - Circle membership lookup
-  - Authorization enforcement
+![Architecture Diagram](https://scott.behrens-hub.com/circles/circles_arch_diagram.png)
 
-### Backend Authorization Rules
+---
 
-1. User must be authenticated
-2. User must be a member of the circle (CircleMemberships table)
-3. If unauthorized → Lambda returns 403 Forbidden
-4. Author name is taken from JWT claims, not the client body
+# 🏗️ Architecture Summary
 
-This ensures zero-trust security whether the request comes from the SPA or a direct API call.
+```
+SPA (CloudFront → S3) 
+    |
+Cognito Hosted UI
+    |
+API Gateway (JWT Auth)
+    |
+Lambda (Node.js 20)
+    |
+DynamoDB Tables
+    |
+Amazon Bedrock (Claude 3 Haiku)
+```
 
-## DynamoDB Data Model
+---
 
-### CirclesMessages
+# ✨ Features
 
-Stores posts in a circle.
+## Messaging
+- Authenticated users post and view messages.
+- Messages sorted newest-first.
 
-- PK: familyId (string)
-- SK: createdAt (ISO string)
-- Other fields: author, text
+## Invitations
+- One-time invite links with TTL and usage tracking.
+- Accepting an invite automatically grants membership.
 
-Example:
-{
-  "familyId": "behrens",
-  "createdAt": "2025-12-04T18:22:11.123Z",
-  "author": "Scott",
-  "text": "Hello from the real Circles API!"
-}
+## Analytics
+- Total circles, unique members, and member-count per circle.
 
-### Circles
+## AI Prompt Generation
+- Generates 3–5 short conversation prompts using Amazon Bedrock.
+- Family-friendly and configurable.
 
-Metadata about each circle:
+---
 
-- PK: circleId
-- Fields: name, description
+# 🛠️ API Endpoints
 
-### CircleMemberships
+| Method | Path | Description |
+|--------|-------|-------------|
+| GET | `/api/circles?familyId=X` | List messages |
+| POST | `/api/circles` | Create message |
+| GET | `/api/circles/config` | List user circles |
+| POST | `/api/circles/{circleId}/invitations` | Create invite |
+| POST | `/api/circles/invitations/accept` | Accept invite |
+| GET | `/api/stats` | Analytics |
+| POST | `/api/prompts` | AI prompt generation |
 
-Defines which users (Cognito sub) belong to which circles.
+---
 
-- PK: userId
-- SK: circleId
-- Fields: role, joinedAt
+# 🧰 CDK Deployment
 
-Backend enforces membership checks for every GET/POST /api/circles request.
+```bash
+npm install
+cdk bootstrap
+cdk deploy
+```
 
-## Authentication: Cognito + JWT + API Gateway Authorizer
+Frontend deploy:
 
-### Cognito Setup
+```bash
+aws s3 sync ./frontend s3://<your-bucket> --delete
+```
 
-- User Pool + Hosted UI
-- User Pool Client (no secret) for browser-based SPA
-- Implicit Flow (response_type=token) for simplicity
-- Redirect URI: https://circles.behrens-hub.com/
+---
 
-### Backend JWT Validation Flow
+# ⚙️ Environment Variables (Lambda)
 
-1. API Gateway uses Cognito Authorizer → validates token, signature, expiry.
-2. Authorizer injects claims (email, username, sub, name) into event.requestContext.authorizer.claims.
-3. Lambda extracts:
-   - userId = claims.sub
-   - author = claims.name || claims.email
-4. Lambda queries CircleMemberships to determine allowed circles.
-5. If a user requests a circle they do not belong to → return 403.
+| Key | Purpose |
+|-----|---------|
+| `TABLE_NAME` | Messages table |
+| `CIRCLES_TABLE_NAME` | Circle metadata |
+| `CIRCLE_MEMBERSHIPS_TABLE_NAME` | Membership tracking |
+| `INVITATIONS_TABLE_NAME` | Invitations |
+| `BEDROCK_MODEL_ID` | Model ID (Claude 3 Haiku) |
+| `BEDROCK_REGION` | `us-east-1` |
 
-## Frontend Behavior
+---
 
-### On initial page load:
+# 🚀 GitHub Actions CI/CD
 
-1. Parse JWT tokens (if returning from Cognito)
-2. Update the UI to show signed in / not signed in
-3. Call /api/circles/config to fetch:
-   - Circles the user is a member of
-   - Circle metadata
-   - Role in each circle
-4. Dynamically populate the <select> dropdown
-5. Restore the last selected circle from localStorage
-6. Load messages for that circle
+```yaml
+name: Deploy Circles
 
-### Message posting
+on:
+  push:
+    branches: [ main ]
 
-- User selects circle
-- Writes text
-- SPA sends:
-  { "familyId": "circleId", "text": "..." }
-- Lambda:
-  - Verifies membership
-  - Uses the JWT author name
-  - Writes the message to CirclesMessages
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
 
-## Key Design Decisions
+    steps:
+    - uses: actions/checkout@v3
 
-- Single-domain CloudFront routing keeps UX simple & avoids CORS issues.
-- API Gateway Cognito Authorizer handles JWT validation so Lambda doesn’t have to.
-- Backend membership enforcement ensures true access control (zero trust).
-- DynamoDB chosen for:
-  - Pay-per-request billing
-  - Simple PK/SK message model
-  - Natural fit for membership relationships
-- Implicit Flow used initially; production version would use Authorization Code + PKCE.
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+        aws-region: us-east-1
 
-## Future Work
+    - name: Install CDK & Dependencies
+      run: |
+        npm install -g aws-cdk
+        cd infra
+        npm install
 
-- Move to Authorization Code + PKCE
-- Add invite flow for adding new circle members
-- Add owner/admin roles
-- UI improvements
-- Search, pagination, real-time updates (WebSockets/AppSync)
+    - name: CDK Deploy
+      run: |
+        cd infra
+        cdk deploy --require-approval never
 
-## Deployment
+    - name: Deploy Frontend
+      run: |
+        aws s3 sync frontend/ s3://$FRONTEND_BUCKET --delete
+```
 
-Deployable via CDK:
+---
 
-    cdk deploy CirclesStack
+# 🔮 Future Enhancements
 
-CDK provisions:
+- Scheduled daily AI prompts  
+- PKCE OAuth  
+- Reactions / likes  
+- Real-time features  
+- Circle creation from UI  
 
-- S3 bucket (private)
-- CloudFront distribution
-- Route 53 record + ACM cert
-- Lambda
-- API Gateway REST API
-- DynamoDB tables
-- Cognito User Pool, Hosted UI domain, User Pool Client
-- API Gateway Cognito Authorizer
+---
+
+# 📜 License  
+MIT

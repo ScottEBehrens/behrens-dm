@@ -11,6 +11,10 @@ const {
   ScanCommand,
 } = require("@aws-sdk/lib-dynamodb");
 
+const {
+  BedrockRuntimeClient,
+  InvokeModelCommand,
+} = require("@aws-sdk/client-bedrock-runtime");
 const { randomUUID } = require("crypto");
 
 // CDK sets these env vars
@@ -26,9 +30,20 @@ const INVITATIONS_TABLE_NAME =
 const FRONTEND_BASE_URL =
   process.env.FRONTEND_BASE_URL || "https://circles.behrens-hub.com";
 
+// Bedrock config
+const BEDROCK_MODEL_ID =
+  process.env.BEDROCK_MODEL_ID || "anthropic.claude-3-haiku-20240307-v1:0";
+const BEDROCK_REGION =
+  process.env.BEDROCK_REGION || process.env.AWS_REGION || "us-east-1";
+
 // Set up DocumentClient-style wrapper
 const ddbClient = new DynamoDBClient({});
 const ddb = DynamoDBDocumentClient.from(ddbClient);
+
+// Bedrock client (on-demand prompts)
+const bedrockClient = new BedrockRuntimeClient({
+  region: BEDROCK_REGION,
+});
 
 function makeResponse(statusCode, body) {
   return {
@@ -240,7 +255,8 @@ async function handleAcceptInvitation(event, context) {
     return makeResponse(400, { message: "Invalid JSON body" });
   }
 
-  const invitationId = payload.invitationId && String(payload.invitationId).trim();
+  const invitationId =
+    payload.invitationId && String(payload.invitationId).trim();
   if (!invitationId) {
     return makeResponse(400, { message: 'Field "invitationId" is required' });
   }
@@ -451,6 +467,246 @@ async function handleGetStats() {
   });
 }
 
+// -------------------------
+// Circle members: list who’s in a circle
+// GET /api/circles/members?familyId=... (or circleId=...)
+// -------------------------
+async function handleGetCircleMembers(event, context) {
+  const { userId, jwtAuthor, userCircleSet } = context;
+
+  if (!userId) {
+    return makeResponse(401, {
+      message: "Unauthorized: no userId in token",
+    });
+  }
+
+  const qs = event.queryStringParameters || {};
+  // Stay consistent with existing API that uses familyId as the circle key,
+  // but also accept circleId as an alias.
+  const circleId = qs.familyId || qs.circleId;
+
+  if (!circleId) {
+    return makeResponse(400, {
+      message: 'Missing required query parameter "familyId" (or "circleId")',
+    });
+  }
+
+  // Zero-trust: caller must already be a member of this circle
+  if (!userCircleSet.has(circleId)) {
+    console.warn(
+      "Forbidden GET /api/circles/members for circleId:",
+      circleId,
+      "userId:",
+      userId
+    );
+    return makeResponse(403, {
+      message: "Forbidden: user is not a member of this circle",
+      circleId,
+    });
+  }
+
+  console.log(
+    "Fetching members for circleId:",
+    circleId,
+    "requested by userId:",
+    userId
+  );
+
+  // For now, use a Scan with filter on circleId.
+  // This is fine at Circles scale and matches how stats currently work.
+  const scanRes = await ddb.send(
+    new ScanCommand({
+      TableName: CIRCLE_MEMBERSHIPS_TABLE_NAME,
+      FilterExpression: "circleId = :c",
+      ExpressionAttributeValues: {
+        ":c": circleId,
+      },
+    })
+  );
+
+  const membershipItems = scanRes.Items || [];
+
+  const members = membershipItems.map((m) => ({
+    userId: m.userId,
+    role: m.role || "member",
+    joinedAt: m.joinedAt || null,
+  }));
+
+  return makeResponse(200, {
+    circleId,
+    members,
+    user: {
+      userId,
+      author: jwtAuthor,
+    },
+  });
+}
+
+// -------------------------
+// Bedrock: generate conversation prompts
+// POST /api/prompts
+// -------------------------
+async function handleGeneratePrompts(event, context) {
+  const { userId, jwtAuthor } = context;
+
+  if (!userId) {
+    return makeResponse(401, { message: "Unauthorized: no userId in token" });
+  }
+
+  let payload = {};
+  if (event.body) {
+    try {
+      payload = JSON.parse(event.body);
+    } catch (e) {
+      console.warn("Invalid JSON body for /api/prompts, using defaults");
+    }
+  }
+
+  // Allow caller to tweak count later; for now default 4, clipped 1–8.
+  const countRaw = Number(payload.count || 4);
+  const count = Math.min(Math.max(countRaw || 4, 1), 8);
+
+  const userInstruction = `
+Generate ${count} short, engaging conversation prompts for families or close friends.
+Each prompt should:
+- Be 1–2 sentences max.
+- Be warm and curious, not cheesy.
+- Be suitable for older kids and adults (late PG-13), avoiding obviously sensitive topics (politics, explicit content, traumatic events).
+- Focus on reflection, memories, or light future plans.
+
+Return ONLY a JSON array of strings.
+For example:
+["Prompt one...", "Prompt two...", "..."]
+
+Do not include any extra text before or after the JSON.
+`.trim();
+
+  const nativeRequest = {
+    anthropic_version: "bedrock-2023-05-31",
+    max_tokens: 512,
+    temperature: 0.7,
+    top_p: 0.9,
+    messages: [
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: userInstruction,
+          },
+        ],
+      },
+    ],
+  };
+
+  console.log(
+    "Invoking Bedrock model:",
+    BEDROCK_MODEL_ID,
+    "in region:",
+    BEDROCK_REGION,
+    "for userId:",
+    userId
+  );
+
+  try {
+    const command = new InvokeModelCommand({
+      modelId: BEDROCK_MODEL_ID,
+      contentType: "application/json",
+      accept: "application/json",
+      body: JSON.stringify(nativeRequest),
+    });
+
+    const response = await bedrockClient.send(command);
+
+    // In the JS v3 client, body is typically a Uint8Array
+    const raw =
+      response.body instanceof Uint8Array
+        ? Buffer.from(response.body).toString("utf8")
+        : String(response.body);
+
+    let modelResult;
+    try {
+      modelResult = JSON.parse(raw);
+    } catch (e) {
+      console.error("Failed to parse Bedrock JSON response:", e, raw);
+      return makeResponse(502, {
+        message: "Failed to parse Bedrock response",
+        raw,
+      });
+    }
+
+    const textBlock =
+      modelResult &&
+      modelResult.content &&
+      modelResult.content[0] &&
+      modelResult.content[0].text
+        ? String(modelResult.content[0].text).trim()
+        : "";
+
+    if (!textBlock) {
+      console.warn("Empty text content from Bedrock:", modelResult);
+      return makeResponse(502, {
+        message: "Empty response from Bedrock",
+      });
+    }
+
+    let prompts = [];
+    try {
+      const parsed = JSON.parse(textBlock);
+      if (Array.isArray(parsed)) {
+        prompts = parsed
+          .map((p) => (typeof p === "string" ? p.trim() : ""))
+          .filter(Boolean);
+      }
+    } catch (e) {
+      // Fallback: split on newlines if model ignored JSON instruction.
+      console.warn(
+        "Bedrock did not return clean JSON array, falling back to line split"
+      );
+      prompts = textBlock
+        .split("\n")
+        .map((line) => line.replace(/^[-*]\s*/, "").trim())
+        .filter(Boolean);
+    }
+
+    // If somehow still empty, bail
+    if (!prompts || prompts.length === 0) {
+      return makeResponse(502, {
+        message: "No prompts generated",
+      });
+    }
+
+    // Truncate to requested count in case the model overshoots
+    if (prompts.length > count) {
+      prompts = prompts.slice(0, count);
+    }
+
+    return makeResponse(200, {
+      message: "Prompts generated",
+      prompts,
+      modelId: BEDROCK_MODEL_ID,
+      region: BEDROCK_REGION,
+      user: {
+        userId,
+        author: jwtAuthor,
+      },
+    });
+  } catch (err) {
+    console.error("Error invoking Bedrock:", {
+      name: err.name,
+      message: err.message,
+      stack: err.stack,
+      metadata: err.$metadata,
+    });
+
+    return makeResponse(502, {
+      message: "Error invoking Bedrock",
+      error: err.message || String(err),
+      code: err.name || undefined,
+    });
+  }
+}
+
 exports.handler = async (event) => {
   console.log("Incoming event:", JSON.stringify(event));
 
@@ -495,6 +751,29 @@ exports.handler = async (event) => {
     if (method === "GET" && path.endsWith("/api/stats")) {
       // Note: currently no auth check; API Gateway may still require JWT
       return await handleGetStats();
+    }
+
+    // --------------------------------------------
+    // Circle members route
+    // GET /api/circles/members
+    // --------------------------------------------
+    if (method === "GET" && path.endsWith("/api/circles/members")) {
+      return await handleGetCircleMembers(event, {
+        userId,
+        jwtAuthor,
+        userCircleSet,
+      });
+    }
+
+    // --------------------------------------------
+    // Bedrock prompts route
+    // POST /api/prompts
+    // --------------------------------------------
+    if (method === "POST" && path.endsWith("/api/prompts")) {
+      return await handleGeneratePrompts(event, {
+        userId,
+        jwtAuthor,
+      });
     }
 
     // --------------------------------------------
