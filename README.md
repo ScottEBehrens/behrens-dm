@@ -1,46 +1,28 @@
-# Circles – Serverless Family Messaging, Invitations & AI-Generated Prompts
+# Circles – Serverless Messaging, AI Context-Aware Prompts & Email Invitations  
+Circles is a cloud-native, serverless relationship-strengthening platform designed for small groups, families, and teams. It demonstrates modern end-to-end AWS engineering patterns while delivering a simple, meaningful user experience.
 
-Circles is a fully serverless, cloud-native messaging and family-engagement application demonstrating modern AWS design patterns.  
-It includes authenticated messaging, invitations, analytics, and **AI-generated conversation starters** powered by Amazon Bedrock.
+The app enables secure group messaging, one-click invitations, analytics, and context-aware AI-generated conversation starters using Amazon Bedrock.
 
 👉 **Live Demo:** https://circles.behrens-hub.com  
-👉 **Portfolio Page:** https://scott.behrens-hub.com/circles
+👉 **Portfolio Page:** https://scott.behrens-hub.com/circles  
 
 ---
 
-## 🌄 Overview
+# 🌄 Overview
 
-Circles is designed as a compact but complete demonstration of cloud engineering capabilities:
+Circles is intentionally minimalist on the surface, but engineered for **real-world scale and clarity**, showcasing:
 
-- Identity & Access Management (Cognito HostedUI + token handling)
-- Secure serverless APIs (API Gateway + Lambda)
-- DynamoDB data modeling  
-- Role-based authorization via membership records  
-- Invitation onboarding system  
-- Analytics endpoints  
-- On-demand AI prompt generation with Bedrock  
-- SPA frontend delivered via CloudFront + S3 (zero dependencies)
+- Cognito authentication (Hosted UI)
+- Zero-trust serverless API (API Gateway + Lambda)
+- DynamoDB data modeling & role-based access
+- One-time invitations & membership lifecycle
+- Circle-level tagging for AI context
+- SES-powered email onboarding
+- AI-generated conversation starters (Claude 3 Haiku)
+- SPA frontend deployed via CloudFront + S3 (no frameworks required)
+- Fully IaC-managed architecture via AWS CDK
 
----
-
-# 📷 Screenshots
-
-> Replace these with real screenshots once available.
-
-### 🔐 Login
-![Login Placeholder](docs/screenshots/login.png)
-
-### 💬 Messaging
-![Messaging Placeholder](docs/screenshots/messages.png)
-
-### 🎟️ Invitations
-![Invites Placeholder](docs/screenshots/invite.png)
-
-### 📊 Analytics
-![Analytics Placeholder](docs/screenshots/analytics.png)
-
-### 🤖 AI Prompts
-![AI Prompts Placeholder](docs/screenshots/ai-prompts.png)
+The entire system is production-shaped but compact, suitable as both a portfolio artifact and a foundation for expansion.
 
 ---
 
@@ -53,57 +35,129 @@ Circles is designed as a compact but complete demonstration of cloud engineering
 # 🏗️ Architecture Summary
 
 ```
-SPA (CloudFront → S3) 
-    |
-Cognito Hosted UI
-    |
-API Gateway (JWT Auth)
-    |
+CloudFront → S3 (SPA Hosting)
+        |
+Cognito Hosted UI (Auth)
+        |
+API Gateway (JWT Authorizer)
+        |
 Lambda (Node.js 20)
-    |
+        |
 DynamoDB Tables
-    |
+   - circles
+   - messages
+   - memberships
+   - invitations
+   - tag-config
+        |
 Amazon Bedrock (Claude 3 Haiku)
+        |
+Amazon SES (Email Invites)
 ```
 
 ---
 
 # ✨ Features
 
-## Messaging
-- Authenticated users post and view messages.
-- Messages sorted newest-first.
-
-## Invitations
-- One-time invite links with TTL and usage tracking.
-- Accepting an invite automatically grants membership.
-
-## Analytics
-- Total circles, unique members, and member-count per circle.
-
-## AI Prompt Generation
-- Generates 3–5 short conversation prompts using Amazon Bedrock.
-- Family-friendly and configurable.
+## 🔐 Authentication (Cognito Hosted UI)
+- Secure login using Cognito’s Hosted UI  
+- Access tokens stored locally for SPA → API communication  
 
 ---
 
-# 🛠️ API Endpoints
+## 💬 Messaging
+- Circle-based message feeds  
+- Authenticated posting  
+- Timestamped, newest-first sorting  
+- Zero-trust design: Lambda validates membership before reading/writing  
+
+---
+
+## 🎟️ Invitations (DynamoDB + SES)
+Circles supports frictionless onboarding via:
+
+### **One-time invitation links**
+- Generated per user per circle  
+- Enforced TTL and one-use semantics  
+- Stored in `invitations` DynamoDB table  
+
+### **SES Email Delivery (new)**
+When a user enters an email address, the system automatically:
+
+1. Creates the invitation record  
+2. Fetches circle details  
+3. Generates the invite link  
+4. Sends a branded HTML + text email using Amazon SES  
+
+Failures to send email do **not** break the API flow — the invite is still created.
+
+---
+
+## 🏷️ Circle Tags (New V1 Feature)
+Each circle can have one or more tags describing:
+
+- Family structure  
+- Life stages  
+- Faith groups  
+- Peer groups  
+- Support groups  
+- Dev/test circles  
+- And more  
+
+Tags are stored in a dedicated DynamoDB table (`circles-tag-config`) and mapped to:
+
+- A user-friendly label  
+- A model-friendly description used for LLM context  
+
+This enables **context-aware prompt generation**.
+
+---
+
+## 🤖 AI Prompt Generation (Bedrock + Claude 3)
+Users can request 3–5 short conversation starters tailored to their circle.
+
+Prompts are influenced by:
+
+- Active circle tags  
+- Tag descriptions  
+- Purpose of the circle  
+- Tone and safety requirements  
+
+Backend uses Amazon Bedrock with Claude 3 Haiku for fast, low-cost inference.
+
+---
+
+## 📊 Analytics
+Lightweight dashboard that shows:
+
+- Total circles  
+- Total memberships  
+- Total messages  
+- Distribution across circles  
+
+---
+
+# 🧰 API Endpoints
 
 | Method | Path | Description |
 |--------|-------|-------------|
-| GET | `/api/circles?familyId=X` | List messages |
-| POST | `/api/circles` | Create message |
-| GET | `/api/circles/config` | List user circles |
-| POST | `/api/circles/{circleId}/invitations` | Create invite |
-| POST | `/api/circles/invitations/accept` | Accept invite |
-| GET | `/api/stats` | Analytics |
-| POST | `/api/prompts` | AI prompt generation |
+| GET | `/api/circles` | List all circles for the authenticated user |
+| GET | `/api/messages?circleId=X` | List messages for a circle |
+| POST | `/api/messages` | Post message to a circle |
+| POST | `/api/circles/{circleId}/invitations` | Create a one-time invitation and send SES email |
+| POST | `/api/circles/invitations/accept` | Accept invitation and create membership |
+| GET | `/api/stats` | Analytics dashboard data |
+| POST | `/api/prompts` | Generate AI conversation prompts (tag-aware) |
+| GET | `/api/tag-config` | (Internal) list tag configuration entries |
 
 ---
 
 # 🧰 CDK Deployment
 
+Backend + infrastructure:
+
 ```bash
+cd infra
 npm install
 cdk bootstrap
 cdk deploy
@@ -117,20 +171,25 @@ aws s3 sync ./frontend s3://<your-bucket> --delete
 
 ---
 
-# ⚙️ Environment Variables (Lambda)
+# ⚙️ Lambda Environment Variables
 
 | Key | Purpose |
 |-----|---------|
 | `TABLE_NAME` | Messages table |
-| `CIRCLES_TABLE_NAME` | Circle metadata |
-| `CIRCLE_MEMBERSHIPS_TABLE_NAME` | Membership tracking |
-| `INVITATIONS_TABLE_NAME` | Invitations |
-| `BEDROCK_MODEL_ID` | Model ID (Claude 3 Haiku) |
-| `BEDROCK_REGION` | `us-east-1` |
+| `CIRCLES_TABLE_NAME` | Circle metadata table |
+| `CIRCLE_MEMBERSHIPS_TABLE_NAME` | Membership mappings |
+| `INVITATIONS_TABLE_NAME` | Invitations table |
+| `CIRCLE_TAG_CONFIG_TABLE_NAME` | Tag metadata table |
+| `SES_FROM_EMAIL` | From-address for Circles invites |
+| `SES_REGION` | SES region (us-east-1) |
+| `BEDROCK_MODEL_ID` | Claude model ID |
+| `FRONTEND_BASE_URL` | Used to build invite URLs |
 
 ---
 
-# 🚀 GitHub Actions CI/CD
+# 🔄 CI/CD (GitHub Actions)
+
+Automated deploy pipeline:
 
 ```yaml
 name: Deploy Circles
@@ -172,13 +231,16 @@ jobs:
 
 # 🔮 Future Enhancements
 
-- Scheduled daily AI prompts  
-- PKCE OAuth  
-- Reactions / likes  
-- Real-time features  
-- Circle creation from UI  
+- Full UI redesign (toasts, layout, prompt cards)
+- Circle creation from UI
+- Per-circle settings UI
+- Scheduled daily AI prompts
+- Reactions / emojis
+- PKCE OAuth
+- Real-time presence/typing indicators
+- Personalized long-form prompt templates
 
 ---
 
 # 📜 License  
-MIT
+MIT  

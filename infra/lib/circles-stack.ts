@@ -1,5 +1,7 @@
 import { Stack, StackProps, RemovalPolicy, CfnOutput, Duration } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
+import { Identity, EmailIdentity } from "aws-cdk-lib/aws-ses";
+import { HostedZone } from "aws-cdk-lib/aws-route53";
 
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
@@ -34,6 +36,13 @@ export class CirclesStack extends Stack {
       domainName: circlesDomain,
       hostedZone,
       region: 'us-east-1',
+    });
+
+    // --- SES Domain Identity ---
+    // This verifies behrens-hub.com and configures MAIL FROM = noreply.behrens-hub.com
+    new EmailIdentity(this, "CirclesDomainIdentity", {
+      identity: Identity.domain(domainRoot),
+      mailFromDomain: `noreply.${domainRoot}`,
     });
 
     // --- S3 Bucket for SPA ---
@@ -82,6 +91,14 @@ export class CirclesStack extends Stack {
       removalPolicy: RemovalPolicy.DESTROY, // OK for dev; consider RETAIN in prod
     });
 
+    // --- DynamoDB Table ---
+    const circlesTagConfigTable = new dynamodb.Table(this, 'CircleTagConfigTable', {
+      tableName: 'circles-tag-config',
+      partitionKey: { name: 'tagKey', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      removalPolicy: RemovalPolicy.DESTROY,
+    });
+
     // --- Lambda Function (API backend) ---
     const apiLambda = new lambda.Function(this, 'CirclesApiLambda', {
       runtime: lambda.Runtime.NODEJS_20_X,
@@ -92,9 +109,11 @@ export class CirclesStack extends Stack {
         CIRCLES_TABLE_NAME: circlesMetaTable.tableName,   // circles metadata
         CIRCLE_MEMBERSHIPS_TABLE_NAME: circleMembershipsTable.tableName, // memberships
         INVITATIONS_TABLE_NAME: circlesInvitationsTable.tableName,
+        CIRCLE_TAG_CONFIG_TABLE_NAME: circlesTagConfigTable.tableName,
         BEDROCK_MODEL_ID: 'anthropic.claude-3-haiku-20240307-v1:0',
-        // optional but nice to be explicit:
-        // BEDROCK_REGION: 'us-east-1',
+        SES_FROM_EMAIL: 'no-reply-circles-invitation@behrens-hub.com',
+        SES_REGION: 'us-east-1',
+        BEDROCK_REGION: 'us-east-1',
       },
       timeout: Duration.seconds(10),
     });
@@ -104,14 +123,8 @@ export class CirclesStack extends Stack {
     circlesMetaTable.grantReadWriteData(apiLambda);
     circleMembershipsTable.grantReadWriteData(apiLambda);
     circlesInvitationsTable.grantReadWriteData(apiLambda);
+    circlesTagConfigTable.grantReadData(apiLambda);
 
-    // // Allow Lambda to call Bedrock
-    // apiLambda.addToRolePolicy(
-    //   new iam.PolicyStatement({
-    //     actions: ['bedrock:InvokeModel'],
-    //     resources: ['*'], // you can tighten to specific model ARN later
-    //   })
-    // );
     apiLambda.addToRolePolicy(
       new iam.PolicyStatement({
         actions: [
@@ -119,6 +132,25 @@ export class CirclesStack extends Stack {
           'bedrock:InvokeModelWithResponseStream',
         ],
         resources: ['*'], // you can tighten to specific model ARNs later
+      }),
+    );
+    apiLambda.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: [
+          "aws-marketplace:ViewSubscriptions",
+          "aws-marketplace:Subscribe"
+        ],  
+        resources: ["*"]
+      })
+    );
+    // --- SES permissions so Lambda can send invitation emails ---
+    apiLambda.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: [
+          'ses:SendEmail',
+          'ses:SendRawEmail',
+        ],
+        resources: ['*'],
       }),
     );
 

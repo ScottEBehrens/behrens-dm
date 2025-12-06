@@ -32,6 +32,8 @@ tmp/
 # -------------------------
 Circles/web/
 staticSites/
+Circles/secrets.txt
+Circles/seed-circle-tags.mjs
 
 # -------------------------
 # OS / Misc

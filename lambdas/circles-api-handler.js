@@ -15,6 +15,10 @@ const {
   BedrockRuntimeClient,
   InvokeModelCommand,
 } = require("@aws-sdk/client-bedrock-runtime");
+
+// SES v3 client for sending invitation emails
+const { SESClient, SendEmailCommand } = require("@aws-sdk/client-ses");
+
 const { randomUUID } = require("crypto");
 
 // CDK sets these env vars
@@ -26,6 +30,10 @@ const CIRCLE_MEMBERSHIPS_TABLE_NAME =
 const INVITATIONS_TABLE_NAME =
   process.env.INVITATIONS_TABLE_NAME || "CircleInvitations"; // invitations
 
+// Tag config table (for approved circle tags)
+const CIRCLE_TAG_CONFIG_TABLE_NAME =
+  process.env.CIRCLE_TAG_CONFIG_TABLE_NAME || "circles-tag-config";
+
 // Optional: base URL to build invite links (fallback to your known domain)
 const FRONTEND_BASE_URL =
   process.env.FRONTEND_BASE_URL || "https://circles.behrens-hub.com";
@@ -36,6 +44,15 @@ const BEDROCK_MODEL_ID =
 const BEDROCK_REGION =
   process.env.BEDROCK_REGION || process.env.AWS_REGION || "us-east-1";
 
+// SES config
+const SES_REGION =
+  process.env.SES_REGION || process.env.AWS_REGION || "us-east-1";
+// Support either SES_FROM_ADDRESS or SES_FROM_EMAIL from env
+const SES_FROM_ADDRESS =
+  process.env.SES_FROM_ADDRESS ||
+  process.env.SES_FROM_EMAIL ||
+  null;
+
 // Set up DocumentClient-style wrapper
 const ddbClient = new DynamoDBClient({});
 const ddb = DynamoDBDocumentClient.from(ddbClient);
@@ -45,6 +62,14 @@ const bedrockClient = new BedrockRuntimeClient({
   region: BEDROCK_REGION,
 });
 
+// SES client (for email invites)
+const sesClient = new SESClient({
+  region: SES_REGION,
+});
+
+// -------------------------
+// Helpers: HTTP response
+// -------------------------
 function makeResponse(statusCode, body) {
   return {
     statusCode,
@@ -58,7 +83,9 @@ function makeResponse(statusCode, body) {
   };
 }
 
-// Extract user info from Cognito JWT claims
+// -------------------------
+// Helpers: user from JWT
+// -------------------------
 function getUserFromEvent(event) {
   const rc = event.requestContext || {};
   const authorizer = rc.authorizer || {};
@@ -100,7 +127,9 @@ function getUserFromEvent(event) {
   };
 }
 
-// Load all circleIds this user is a member of
+// -------------------------
+// Helpers: memberships
+// -------------------------
 async function getUserMembershipCircleIds(userId) {
   if (!userId) return [];
 
@@ -122,6 +151,202 @@ async function getUserMembershipCircleIds(userId) {
   console.log("User membership circleIds:", circleIds);
 
   return circleIds;
+}
+
+// -------------------------
+// TagConfig loader + helpers
+// -------------------------
+
+// Cache of all active tags for this Lambda container
+let cachedTagConfig = null;
+
+/**
+ * Load all active tag config items from the CircleTagConfig table.
+ * Each item should resemble:
+ *  {
+ *    tagKey,
+ *    displayLabel,
+ *    category,       // e.g. "life_stage" | "relationship" | "support"
+ *    description?,
+ *    toneGuidance?,
+ *    active: true
+ *  }
+ */
+async function loadAllTagConfigs() {
+  if (!CIRCLE_TAG_CONFIG_TABLE_NAME) {
+    console.warn(
+      "CIRCLE_TAG_CONFIG_TABLE_NAME is not set; returning empty tag config."
+    );
+    return [];
+  }
+
+  if (cachedTagConfig) {
+    return cachedTagConfig;
+  }
+
+  console.log(
+    "Scanning tag config table:",
+    CIRCLE_TAG_CONFIG_TABLE_NAME,
+    "for active tags"
+  );
+
+  const result = await ddb.send(
+    new ScanCommand({
+      TableName: CIRCLE_TAG_CONFIG_TABLE_NAME,
+      // Only keep active tags if field exists; otherwise treat all as active
+      FilterExpression: "attribute_not_exists(active) OR #active = :true",
+      ExpressionAttributeNames: { "#active": "active" },
+      ExpressionAttributeValues: { ":true": true },
+    })
+  );
+
+  const items = result.Items || [];
+
+  cachedTagConfig = items.map((item) => ({
+    tagKey: item.tagKey,
+    displayLabel: item.displayLabel || item.tagKey,
+    category: item.category || "uncategorized",
+    description: item.description || "",
+    toneGuidance: item.toneGuidance || "",
+    active:
+      typeof item.active === "boolean" ? item.active : true,
+  }));
+
+  console.log("Loaded tag config count:", cachedTagConfig.length);
+
+  return cachedTagConfig;
+}
+
+/**
+ * Given a list of tag keys, return the matching TagConfig objects.
+ */
+async function getTagDetails(tagKeys) {
+  if (!Array.isArray(tagKeys) || tagKeys.length === 0) {
+    return [];
+  }
+
+  const all = await loadAllTagConfigs();
+  const keySet = new Set(tagKeys);
+
+  return all.filter((t) => keySet.has(t.tagKey));
+}
+
+/**
+ * Fetch a circle by id and resolve its tag details (if any).
+ */
+async function getCircleAndTagContext(circleId) {
+  if (!circleId) {
+    return { circle: null, tagKeys: [], tagDetails: [] };
+  }
+
+  let circle = null;
+  try {
+    const res = await ddb.send(
+      new GetCommand({
+        TableName: CIRCLES_TABLE_NAME,
+        Key: { circleId },
+      })
+    );
+    circle = res.Item || null;
+  } catch (e) {
+    console.error("Error fetching circle for tag context:", e);
+  }
+
+  const tagKeys =
+    circle && Array.isArray(circle.tags) ? circle.tags : [];
+
+  const tagDetails = await getTagDetails(tagKeys);
+
+  return { circle, tagKeys, tagDetails };
+}
+
+// -------------------------
+// Email helper: send invitation email via SES
+// -------------------------
+
+async function sendInvitationEmail({
+  toEmail,
+  inviteUrl,
+  circleName,
+  inviterName,
+}) {
+  if (!SES_FROM_ADDRESS) {
+    console.warn(
+      "SES_FROM_ADDRESS is not set; skipping sending invitation email."
+    );
+    return {
+      skipped: true,
+      reason: "SES_FROM_ADDRESS not configured",
+    };
+  }
+
+  const safeCircleName = circleName || "your circle";
+  const safeInviterName = inviterName || "someone in your circle";
+
+  const subject = `You’ve been invited to join ${safeCircleName}`;
+  const textBody = [
+    `Hi there,`,
+    ``,
+    `${safeInviterName} has invited you to join the circle "${safeCircleName}" on Circles.`,
+    ``,
+    `Click the link below to view the invitation and join:`,
+    inviteUrl,
+    ``,
+    `If you weren’t expecting this, you can safely ignore this email.`,
+  ].join("\n");
+
+  const htmlBody = `
+    <html>
+      <body>
+        <p>Hi there,</p>
+        <p><strong>${safeInviterName}</strong> has invited you to join the circle "<strong>${safeCircleName}</strong>" on Circles.</p>
+        <p>
+          Click the link below to view the invitation and join:
+          <br/>
+          <a href="${inviteUrl}">${inviteUrl}</a>
+        </p>
+        <p>If you weren’t expecting this, you can safely ignore this email.</p>
+      </body>
+    </html>
+  `;
+
+  const params = {
+    Source: SES_FROM_ADDRESS,
+    Destination: {
+      ToAddresses: [toEmail],
+    },
+    Message: {
+      Subject: {
+        Data: subject,
+        Charset: "UTF-8",
+      },
+      Body: {
+        Text: {
+          Data: textBody,
+          Charset: "UTF-8",
+        },
+        Html: {
+          Data: htmlBody,
+          Charset: "UTF-8",
+        },
+      },
+    },
+  };
+
+  console.log("Sending SES invitation email:", {
+    toEmail,
+    subject,
+    SES_REGION,
+    SES_FROM_ADDRESS,
+  });
+
+  const result = await sesClient.send(new SendEmailCommand(params));
+  console.log("SES SendEmail result:", result);
+
+  return {
+    skipped: false,
+    messageId: result.MessageId,
+  };
 }
 
 // -------------------------
@@ -218,11 +443,49 @@ async function handleCreateInvitation(event, context) {
     invitationId
   )}`;
 
+  // Optionally look up circle name for nicer email subject/body
+  let circleName = circleId;
+  try {
+    const circleRes = await ddb.send(
+      new GetCommand({
+        TableName: CIRCLES_TABLE_NAME,
+        Key: { circleId },
+      })
+    );
+    if (circleRes.Item && circleRes.Item.name) {
+      circleName = circleRes.Item.name;
+    }
+  } catch (e) {
+    console.error("Error fetching circle metadata for invitation email:", e);
+  }
+
+  // Attempt to send email, but don't fail the whole request if SES errors
+  let emailResult = {
+    skipped: true,
+    reason: "Not attempted",
+  };
+
+  try {
+    emailResult = await sendInvitationEmail({
+      toEmail: email,
+      inviteUrl,
+      circleName,
+      inviterName: jwtAuthor || userId || "A circle member",
+    });
+  } catch (e) {
+    console.error("Error sending invitation email via SES:", e);
+    emailResult = {
+      skipped: true,
+      reason: `SES error: ${e.message || String(e)}`,
+    };
+  }
+
   return makeResponse(201, {
     message: "Invitation created",
     invitationId,
     inviteUrl,
     invitation: item,
+    email: emailResult,
     user: {
       userId,
       author: jwtAuthor,
@@ -527,6 +790,7 @@ async function handleGetCircleMembers(event, context) {
   const membershipItems = scanRes.Items || [];
 
   const members = membershipItems.map((m) => ({
+
     userId: m.userId,
     role: m.role || "member",
     joinedAt: m.joinedAt || null,
@@ -547,7 +811,7 @@ async function handleGetCircleMembers(event, context) {
 // POST /api/prompts
 // -------------------------
 async function handleGeneratePrompts(event, context) {
-  const { userId, jwtAuthor } = context;
+  const { userId, jwtAuthor, userCircleSet } = context;
 
   if (!userId) {
     return makeResponse(401, { message: "Unauthorized: no userId in token" });
@@ -562,17 +826,95 @@ async function handleGeneratePrompts(event, context) {
     }
   }
 
+  // Allow caller to pass circleId/familyId so we can use tags
+  const circleId = payload.familyId || payload.circleId || null;
+
+  // Enforce that user is in the circle if one is provided
+  if (circleId && !userCircleSet.has(circleId)) {
+    console.warn(
+      "Forbidden POST /api/prompts for circleId:",
+      circleId,
+      "userId:",
+      userId
+    );
+    return makeResponse(403, {
+      message: "Forbidden: user is not a member of this circle",
+      circleId,
+    });
+  }
+
   // Allow caller to tweak count later; for now default 4, clipped 1–8.
   const countRaw = Number(payload.count || 4);
   const count = Math.min(Math.max(countRaw || 4, 1), 8);
 
-  const userInstruction = `
-Generate ${count} short, engaging conversation prompts for families or close friends.
+  // -------------------------
+  // Build tag-aware instructions
+  // -------------------------
+
+  let tagDetails = [];
+  let circleNameForContext = null;
+
+  if (circleId) {
+    try {
+      const res = await getCircleAndTagContext(circleId);
+      tagDetails = res.tagDetails || [];
+      circleNameForContext =
+        (res.circle && res.circle.name) || circleId || null;
+    } catch (e) {
+      console.error("Error getting circle tag context:", e);
+    }
+  }
+
+  const supportTags = tagDetails
+    .filter((t) => t.category === "support")
+    .map((t) => t.displayLabel);
+
+  const nonSupportLabels = tagDetails
+    .filter((t) => t.category !== "support")
+    .map((t) => t.displayLabel);
+
+  let tagContextLines = [];
+
+  if (circleNameForContext) {
+    tagContextLines.push(
+      `The circle is called "${circleNameForContext}".`
+    );
+  }
+
+  if (tagDetails.length > 0) {
+    const allLabels = tagDetails.map((t) => t.displayLabel);
+    tagContextLines.push(
+      `This circle is described with the following tags: ${allLabels.join(
+        ", "
+      )}.`
+    );
+  }
+
+  if (supportTags.length > 0) {
+    tagContextLines.push(
+      "Treat this as a support-oriented context. Be especially gentle and validating. Avoid giving medical or mental-health advice, and avoid anything that could reopen trauma or pressure people to share more than they want."
+    );
+  }
+
+  if (nonSupportLabels.length > 0 && supportTags.length === 0) {
+    tagContextLines.push(
+      "Use these tags to tailor the tone and topics so prompts feel relevant and emotionally safe for this group."
+    );
+  }
+
+  const tagContextInstruction =
+    tagContextLines.length > 0
+      ? tagContextLines.join(" ") + "\n\n"
+      : "";
+
+  const baseInstruction = `
+Generate ${count} short, engaging conversation prompts for this private circle of families or close friends.
+
 Each prompt should:
 - Be 1–2 sentences max.
 - Be warm and curious, not cheesy.
-- Be suitable for older kids and adults (late PG-13), avoiding obviously sensitive topics (politics, explicit content, traumatic events).
-- Focus on reflection, memories, or light future plans.
+- Be suitable for older kids and adults (late PG-13), avoiding obviously sensitive topics (politics, explicit content, traumatic events) unless the tags clearly indicate a support context, in which case keep things very gentle and optional.
+- Focus on reflection, memories, gentle check-ins, or light future plans.
 
 Return ONLY a JSON array of strings.
 For example:
@@ -580,6 +922,8 @@ For example:
 
 Do not include any extra text before or after the JSON.
 `.trim();
+
+  const userInstruction = `${tagContextInstruction}${baseInstruction}`;
 
   const nativeRequest = {
     anthropic_version: "bedrock-2023-05-31",
@@ -605,7 +949,11 @@ Do not include any extra text before or after the JSON.
     "in region:",
     BEDROCK_REGION,
     "for userId:",
-    userId
+    userId,
+    "circleId:",
+    circleId,
+    "tagCount:",
+    tagDetails.length
   );
 
   try {
@@ -686,6 +1034,8 @@ Do not include any extra text before or after the JSON.
       prompts,
       modelId: BEDROCK_MODEL_ID,
       region: BEDROCK_REGION,
+      circleId: circleId || null,
+      tagsUsed: tagDetails.map((t) => t.tagKey),
       user: {
         userId,
         author: jwtAuthor,
@@ -773,6 +1123,7 @@ exports.handler = async (event) => {
       return await handleGeneratePrompts(event, {
         userId,
         jwtAuthor,
+        userCircleSet,
       });
     }
 
