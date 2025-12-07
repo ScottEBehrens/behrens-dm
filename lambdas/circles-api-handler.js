@@ -1057,6 +1057,116 @@ Do not include any extra text before or after the JSON.
   }
 }
 
+// -------------------------
+// Circle: create
+// POST /api/circles with { action: "createCircle", ... }
+// -------------------------
+async function handleCreateCircle(payload, context) {
+  const { userId, jwtAuthor, jwtClaims } = context;
+
+  if (!userId) {
+    return makeResponse(401, {
+      message: "Unauthorized: no userId in token",
+    });
+  }
+
+  const now = new Date();
+  const nowIso = now.toISOString();
+
+  const rawName = payload.name ?? payload.circleName;
+  const name = rawName && String(rawName).trim();
+
+  if (!name) {
+    return makeResponse(400, {
+      message: 'Field "name" (or "circleName") is required',
+    });
+  }
+
+  const description =
+    payload.description && String(payload.description).trim()
+      ? String(payload.description).trim()
+      : "";
+
+  // Tags: expect an array of tag keys, filter to strings
+  let tags = [];
+  if (Array.isArray(payload.tags)) {
+    tags = payload.tags
+      .map((t) => String(t).trim())
+      .filter((t) => t.length > 0);
+  }
+
+  // Optionally, validate tags against tag config (best-effort; non-fatal)
+  if (tags.length > 0) {
+    try {
+      const validTagDetails = await getTagDetails(tags);
+      const validKeys = new Set(validTagDetails.map((t) => t.tagKey));
+      tags = tags.filter((t) => validKeys.has(t));
+    } catch (e) {
+      console.warn(
+        "Error validating tags while creating circle; proceeding with raw tags",
+        e
+      );
+    }
+  }
+
+  // Generate a circleId (random UUID-based)
+  const circleId = `circle_${randomUUID()}`;
+
+  const circleItem = {
+    circleId,
+    name,
+    description,
+    tags,
+    createdAt: nowIso,
+    createdByUserId: userId,
+  };
+
+  console.log("Creating circle:", circleItem);
+
+  // Create circle metadata (fail if circleId somehow exists)
+  await ddb.send(
+    new PutCommand({
+      TableName: CIRCLES_TABLE_NAME,
+      Item: circleItem,
+      ConditionExpression: "attribute_not_exists(circleId)",
+    })
+  );
+
+  // Create creator membership with rich role info
+  const membershipItem = {
+    userId,
+    circleId,
+    role: "owner", // primary role
+    joinedAt: nowIso,
+    // additional flags so we can evolve roles later
+    isCreator: true,
+    isOwner: true,
+    isAdmin: true,
+    isMember: true,
+  };
+
+  console.log("Creating creator membership:", membershipItem);
+
+  await ddb.send(
+    new PutCommand({
+      TableName: CIRCLE_MEMBERSHIPS_TABLE_NAME,
+      Item: membershipItem,
+    })
+  );
+
+  return makeResponse(201, {
+    message: "Circle created",
+    circle: circleItem,
+    membership: membershipItem,
+    user: {
+      userId,
+      author: jwtAuthor,
+      claims: jwtClaims || undefined,
+    },
+  });
+}
+
+
 exports.handler = async (event) => {
   console.log("Incoming event:", JSON.stringify(event));
 
@@ -1302,7 +1412,9 @@ exports.handler = async (event) => {
     }
 
     // --------------------------------------------------
-    // POST /api/circles (create message) with membership enforcement
+    // POST /api/circles
+    // - createCircle: create a new circle + membership
+    // - default: create message in an existing circle
     // --------------------------------------------------
     if (method === "POST" && path.endsWith("/api/circles")) {
       if (!event.body) {
@@ -1321,6 +1433,20 @@ exports.handler = async (event) => {
       } catch (e) {
         return makeResponse(400, { message: "Invalid JSON body" });
       }
+
+      const action =
+        payload.action && String(payload.action).trim().toLowerCase();
+
+      // ---- NEW: circle creation branch ----
+      if (action === "createcircle") {
+        return await handleCreateCircle(payload, {
+          userId,
+          jwtAuthor,
+          jwtClaims,
+        });
+      }
+
+      // ---- Existing behavior: create a message in a circle ----
 
       const familyId = String(payload.familyId || "behrens").trim();
       const rawText = payload.text;
@@ -1347,7 +1473,7 @@ exports.handler = async (event) => {
       const author = jwtAuthor || "unknown";
       const createdAt = new Date().toISOString();
 
-      // --- NEW: messageType / questionId / messageId handling ---
+      // --- messageType / questionId / messageId handling ---
 
       // messageType: default to "answer" unless explicitly "question"
       const rawType =

@@ -1,0 +1,1772 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Circles – Messages</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" type="image/svg+xml" href="/circle.svg">
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #020617;
+      color: #e5e7eb;
+      margin: 0;
+      padding: 2rem;
+      display: flex;
+      justify-content: center;
+    }
+    .card {
+      background: #020617;
+      border-radius: 16px;
+      padding: 1.75rem;
+      max-width: 800px;
+      width: 100%;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+      border: 1px solid #1f2937;
+    }
+
+    /* Header */
+    .header-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 1rem;
+    }
+    .title-row {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    .logo-circle img {
+      width: 32px;
+      height: 32px;
+      display: block;
+    }
+    h1 {
+      margin-top: 0;
+      font-size: 1.7rem;
+      margin-bottom: 0.1rem;
+    }
+    .subtitle {
+      font-size: 0.85rem;
+      color: #9ca3af;
+      margin: 0;
+    }
+    .user-auth {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 0.35rem;
+    }
+    .user-auth-info {
+      font-size: 0.8rem;
+      color: #9ca3af;
+      text-align: right;
+    }
+    .status-pill {
+      font-size: 0.8rem;
+      padding: 0.15rem 0.6rem;
+      border-radius: 999px;
+      border: 1px solid #4b5563;
+      color: #9ca3af;
+      white-space: nowrap;
+    }
+    .status-pill.ok {
+      border-color: #22c55e;
+      color: #bbf7d0;
+    }
+    .status-pill.err {
+      border-color: #f97316;
+      color: #fed7aa;
+    }
+
+    /* Hide old nav tabs – analytics now via footer link */
+    .nav-tabs {
+      display: none;
+    }
+
+    /* Message composer row */
+    form {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      align-items: stretch;
+      margin: 1.25rem 0 1.0rem;
+    }
+    /* Remove instructional label text */
+    form label {
+      display: none;
+    }
+    .circle-label {
+      display: none;
+    }
+
+    input[type="text"],
+    input[type="email"],
+    textarea,
+    select {
+      background: #020617;
+      border-radius: 999px;
+      border: 1px solid #374151;
+      color: #e5e7eb;
+      padding: 0.5rem 0.75rem;
+      font-size: 0.9rem;
+      outline: none;
+    }
+    textarea {
+      border-radius: 12px;
+      resize: vertical;
+      min-height: 2.4rem;
+    }
+    input[type="text"]:focus,
+    input[type="email"]:focus,
+    textarea:focus,
+    select:focus {
+      border-color: #2563eb;
+    }
+
+    #circleSelect {
+      flex: 0 0 auto;
+      min-width: 170px;
+    }
+    #textInput {
+      flex: 1 1 320px;
+      max-width: 100%;
+    }
+    #submitBtn {
+      flex: 0 0 auto;
+      align-self: stretch;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding-inline: 1.2rem;
+    }
+
+    .load-more-questions {
+      margin-top: 0.25rem;
+      background: transparent;
+      border: none;
+      color: #93c5fd;
+      font-size: 0.85rem;
+      cursor: pointer;
+    }
+
+    .load-more-questions:hover {
+      text-decoration: underline;
+    }
+
+    button {
+      background: #2563eb; 
+      border: none;
+      color: #022c22;
+      font-weight: 600;
+      padding: 0.55rem 1.1rem;
+      border-radius: 999px;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    button:disabled {
+      opacity: 0.6;
+      cursor: default;
+    }
+
+    .signed-out-splash {
+      padding: 1.5rem 0 1.25rem;
+      border-top: 1px solid #1f2937;
+      border-bottom: 1px solid #1f2937;
+      text-align: center;
+    }
+
+    .signed-out-splash h2 {
+      margin: 0 0 0.5rem;
+      font-size: 1.2rem;
+    }
+
+    .signed-out-splash p {
+      margin: 0 0 1rem;
+      font-size: 0.9rem;
+      color: #9ca3af;
+    }
+
+    /* Messages list */
+    .messages {
+      border-top: 1px solid #1f2937;
+      padding-top: 0.75rem;
+      margin-top: 0.25rem;
+    }
+    .message {
+      margin-top: 0.6rem;
+      padding: 0.6rem 0.8rem;
+      border-radius: 0.75rem;
+      border: 1px solid #1f2937;
+      background: #020617;
+    }
+    .message:hover {
+      border-color: #60a5fa;     /* lighter bright blue */
+      background: #0f1e40;        /* slightly lighter tint than your question card */
+    }
+
+    /* Current question wrapper */
+    .current-question-wrapper {
+      margin-bottom: 1rem;
+      padding-bottom: 0.75rem;
+      border-bottom: 1px solid #1f2937;
+    }
+
+    /* "Current Question" label */
+    .current-question-label {
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #93c5fd;
+      margin-bottom: 0.35rem;
+    }
+
+    /* Question card (we already had .message.question; this just reinforces it) */
+    .message.question {
+      border: 2px solid #2563eb;
+      background: #0b173d;
+      padding: 0.75rem 1rem;
+    }
+
+    .message.question .meta .author {
+      color: #93c5fd;
+    }
+
+    .message.question .text {
+      color: #e0ecff;
+    }
+
+    /* Answers header */
+    .answers-header {
+      margin: 0.25rem 0 0.35rem;
+      font-size: 0.85rem;
+      color: #9ca3af;
+    }
+
+
+    .message.question .meta .author {
+      color: #93c5fd;                /* optional: lighter blue for the author */
+    }
+
+    .message.question .text {
+      color: #e0ecff;                /* optional: more readable for questions */
+    }
+
+    .question-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      font-size: 0.8rem;
+      color: #9ca3af;
+      margin-top: 0.35rem;
+    }
+
+    .question-toggle input {
+      transform: scale(0.9);
+    }
+
+    .meta {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.8rem;
+      color: #9ca3af;
+      margin-bottom: 0.25rem;
+      gap: 0.5rem;
+    }
+    .author {
+      font-weight: 600;
+    }
+    .text {
+      font-size: 0.95rem;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      color: #e5f2ff;
+    }
+    .empty {
+      font-size: 0.9rem;
+      color: #6b7280;
+      padding: 0.5rem 0;
+    }
+
+    /* Invite section */
+    .invite-section {
+      margin-top: 1.5rem;
+      padding-top: 1rem;
+      border-top: 1px solid #1f2937;
+      font-size: 0.9rem;
+    }
+    .invite-row {
+      display: flex;
+      gap: 0.5rem;
+      margin-top: 0.5rem;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .invite-row input[type="email"] {
+      flex: 1 1 220px;
+      border-radius: 999px;
+    }
+    .invite-result {
+      margin-top: 0.5rem;
+      font-size: 0.8rem;
+      color: #9ca3af;
+      word-break: break-all;
+    }
+    .invite-result code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size: 0.75rem;
+    }
+
+    /* Circle members view */
+    .members-section {
+      margin-top: 1rem;
+      padding-top: 0.75rem;
+      border-top: 1px solid #1f2937;
+      font-size: 0.9rem;
+    }
+    .members-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 0.4rem;
+    }
+    .members-body {
+      font-size: 0.85rem;
+      color: #e5e7eb;
+    }
+    .members-body.empty {
+      color: #6b7280;
+    }
+    .members-list {
+      list-style: none;
+      padding-left: 0;
+      margin: 0;
+    }
+    .members-list li {
+      padding: 0.25rem 0;
+      border-bottom: 1px solid #111827;
+      font-size: 0.85rem;
+    }
+    .members-list li:last-child {
+      border-bottom: none;
+    }
+    .members-role {
+      font-size: 0.75rem;
+      color: #9ca3af;
+      margin-left: 0.4rem;
+    }
+
+    /* Prompt ideas view */
+    .prompts-section {
+      margin-top: 1.25rem;
+      padding-top: 1rem;
+      border-top: 1px solid #1d4ed8;
+      font-size: 0.9rem;
+    }
+    .prompts-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 0.4rem;
+    }
+    .prompts-body {
+      font-size: 0.85rem;
+      color: #e5e7eb;
+    }
+    .prompts-body.empty {
+      color: #6b7280;
+    }
+    .prompts-list {
+      list-style: none;
+      padding-left: 0;
+      margin: 0.25rem 0 0;
+    }
+    .prompts-list li {
+      padding: 0.25rem 0.15rem;
+      border-bottom: 1px solid #111827;
+      font-size: 0.85rem;
+      cursor: pointer;
+    }
+    .prompts-list li:last-child {
+      border-bottom: none;
+    }
+    .prompt-text {
+      display: inline-block;
+      margin-right: 0.5rem;
+    }
+    .prompt-hint {
+      font-size: 0.75rem;
+      color: #9ca3af;
+    }
+
+    /* Analytics view */
+    #analytics-section {
+      margin-top: 1.25rem;
+    }
+    .analytics-summary {
+      font-size: 0.9rem;
+      color: #e5e7eb;
+      margin-bottom: 0.75rem;
+    }
+    .analytics-summary div {
+      margin-bottom: 0.15rem;
+    }
+    .analytics-members {
+      font-size: 0.85rem;
+      color: #e5e7eb;
+    }
+    .analytics-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 0.5rem;
+    }
+    .analytics-table th,
+    .analytics-table td {
+      border-bottom: 1px solid #111827;
+      padding: 0.4rem 0.2rem;
+      text-align: left;
+    }
+    .analytics-table th {
+      font-weight: 600;
+      color: #9ca3af;
+      font-size: 0.8rem;
+    }
+
+    /* Footer */
+    .footer-row {
+      margin-top: 1.25rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.75rem;
+      color: #6b7280;
+    }
+    .analytics-link {
+      background: transparent;
+      border: none;
+      color: #9ca3af;
+      padding: 0;
+      font-size: 0.8rem;
+      cursor: pointer;
+      text-decoration: underline;
+    }
+    .analytics-link:hover {
+      color: #e5e7eb;
+    }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <div class="header-row">
+      <div class="title-row">
+        <div class="logo-circle">
+          <img src="/circle.svg" alt="Circles logo">
+        </div>
+        <div>
+          <h1>Circles – Messages</h1>
+        </div>
+      </div>
+      <div class="user-auth">
+        <div id="userInfo" class="user-auth-info">Not signed in</div>
+        <button id="authButton" type="button">Sign in</button>
+        <div id="statusPill" class="status-pill">idle</div>
+      </div>
+    </div>
+
+    <!-- (Hidden) nav tabs kept for JS compatibility -->
+    <div class="nav-tabs">
+      <button id="tab-messages" class="tab active" type="button">Messages</button>
+      <button id="tab-analytics" class="tab" type="button">Analytics</button>
+    </div>
+
+    <!-- Messages / main app view -->
+    <section id="messages-section">
+
+      <!-- Signed-out splash (shown only when not signed in) -->
+      <section id="signed-out-splash" class="signed-out-splash" style="display:none;">
+        <h2>Welcome to Circles</h2>
+        <p>Sign in to see your circles, read messages, and start new conversations.</p>
+        <button id="splash-signin" type="button">Sign in to view your circles</button>
+      </section>
+
+      <!-- Signed-in main content (what you already have today) -->
+      <div id="signed-in-main">
+        <form id="messageForm">
+          <!-- label kept only for accessibility, hidden via CSS -->
+          <label for="textInput">Post a new message</label>
+
+          <select id="circleSelect">
+            <!-- Defaults; will be replaced by /api/circles/config when signed in -->
+            <option value="devteam">Circles Dev Team</option>
+          </select>
+
+          <textarea id="textInput" placeholder="Type your message..."></textarea>
+          <label class="question-toggle">
+          <input type="checkbox" id="isQuestionToggle">
+          Make Question
+          </label>
+          <button id="submitBtn" type="submit">Post</button>
+        </form>
+
+        <div class="messages" id="messages">
+          <div class="empty">Loading messages…</div>
+        </div>
+
+        <!-- Prompt ideas section (between messages and invite) -->
+        <section id="prompts-section" class="prompts-section" style="display:none;">
+          <div class="prompts-header">
+            <strong>Need ideas?</strong>
+            <button id="prompts-button" type="button">Suggest prompts</button>
+          </div>
+          <div id="prompts-body" class="prompts-body empty">
+            Click “Suggest prompts” to get conversation starters for this circle.
+          </div>
+        </section>
+
+        <!-- Invite section -->
+        <section id="invite-section" class="invite-section" style="display:none;">
+          <div><strong>Invite Someone Into This Circle</strong></div>
+          <div class="invite-row">
+            <input type="email" id="invite-email" placeholder="name@example.com" />
+            <button id="invite-button" type="button">Create invite</button>
+          </div>
+          <div id="invite-result" class="invite-result"></div>
+        </section>
+
+        <!-- Circle members section -->
+        <section id="members-section" class="members-section" style="display:none;">
+          <div class="members-header">
+            <strong>Circle members</strong>
+            <button id="refresh-members" type="button">Who’s in this circle?</button>
+          </div>
+          <div id="members-body" class="members-body empty">
+            Sign in and select a circle, then click “Who’s in this circle?”.
+          </div>
+        </section>
+      </div>
+    </section>
+
+
+    <!-- Analytics / dashboard view (toggled via footer link) -->
+    <section id="analytics-section" style="display:none;">
+      <h2 style="font-size:1.2rem; margin:0 0 0.4rem;">Analytics</h2>
+      <p class="subtitle" style="margin-bottom:0.75rem;">
+        Usage stats for this Circles deployment.
+      </p>
+      <div id="analytics-summary" class="analytics-summary">
+        Sign in to view analytics.
+      </div>
+      <div id="analytics-members" class="analytics-members"></div>
+    </section>
+
+    <div class="footer-row">
+      <span id="debugStatus">Last action: init</span>
+      <button id="analytics-link" type="button" class="analytics-link">Analytics</button>
+    </div>
+  </main>
+
+  <!-- ORIGINAL JS LOGIC (UNCHANGED) -->
+  <script>
+    // === Cognito config (from CDK outputs) ===
+    const COGNITO_HOSTED_UI = 'https://circles-behrens-hub.auth.us-east-1.amazoncognito.com';
+    const COGNITO_CLIENT_ID = '1qo7fkkum9a8tub5s56r2mjnua';
+    const REDIRECT_URI = 'https://circles.behrens-hub.com/';
+    const COGNITO_SCOPE = 'openid email profile';
+
+    // Local storage keys
+    const LS_ID_TOKEN_KEY = 'circles_id_token';
+    const LS_ACCESS_TOKEN_KEY = 'circles_access_token';
+    const LS_USER_CLAIMS_KEY = 'circles_user_claims';
+    const LS_SELECTED_CIRCLE_KEY = 'circles_selected_circle';
+    const LS_PENDING_INVITE_KEY = 'circles_pending_invite';
+
+    const statusPill = document.getElementById('statusPill');
+    const debugStatus = document.getElementById('debugStatus');
+    const messagesEl = document.getElementById('messages');
+    const form = document.getElementById('messageForm');
+    const textInput = document.getElementById('textInput');
+    const submitBtn = document.getElementById('submitBtn');
+    const userInfoEl = document.getElementById('userInfo');
+    const authButton = document.getElementById('authButton');
+    const circleSelect = document.getElementById('circleSelect');
+
+    const inviteSection = document.getElementById('invite-section');
+    const inviteEmailInput = document.getElementById('invite-email');
+    const inviteButton = document.getElementById('invite-button');
+    const inviteResult = document.getElementById('invite-result');
+
+    const membersSection = document.getElementById('members-section');
+    const membersBody = document.getElementById('members-body');
+    const membersButton = document.getElementById('refresh-members');
+
+    const promptsSection = document.getElementById('prompts-section');
+    const promptsBody = document.getElementById('prompts-body');
+    const promptsButton = document.getElementById('prompts-button');
+
+    const tabMessages = document.getElementById('tab-messages');
+    const tabAnalytics = document.getElementById('tab-analytics');
+    const messagesSection = document.getElementById('messages-section');
+    const analyticsSection = document.getElementById('analytics-section');
+    const analyticsSummary = document.getElementById('analytics-summary');
+    const analyticsMembers = document.getElementById('analytics-members');
+
+    const signedInMain = document.getElementById('signed-in-main');
+    const signedOutSplash = document.getElementById('signed-out-splash');
+    const splashSignin = document.getElementById('splash-signin');
+
+    let currentQuestionId = null;        // messageId of current question for this circle
+    let nextMessageType = 'answer';      // default
+    let questionsShownCount = 1;   // start by showing only the latest question
+
+    const isQuestionToggle = document.getElementById('isQuestionToggle');
+
+    const CIRCLE_LABELS = {
+      behrens: 'Behrens Family',
+      devteam: 'Circles Dev Team',
+      dickerson: 'Dickerson Family',
+    };
+
+    // === JWT helpers ===
+    function base64UrlDecode(input) {
+      let str = input.replace(/-/g, '+').replace(/_/g, '/');
+      const pad = str.length % 4;
+      if (pad === 2) str += '==';
+      else if (pad === 3) str += '=';
+      return atob(str);
+    }
+
+    function decodeJwt(token) {
+      if (!token) return null;
+      const parts = token.split('.');
+      if (parts.length !== 3) return null;
+      try {
+        const payload = base64UrlDecode(parts[1]);
+        return JSON.parse(payload);
+      } catch (e) {
+        console.error('Failed to decode JWT', e);
+        return null;
+      }
+    }
+
+    function setTokens(idToken, accessToken) {
+      if (idToken) {
+        localStorage.setItem(LS_ID_TOKEN_KEY, idToken);
+        const claims = decodeJwt(idToken);
+        if (claims) {
+          localStorage.setItem(LS_USER_CLAIMS_KEY, JSON.stringify(claims));
+        }
+      }
+      if (accessToken) {
+        localStorage.setItem(LS_ACCESS_TOKEN_KEY, accessToken);
+      }
+    }
+
+    function clearTokens() {
+      localStorage.removeItem(LS_ID_TOKEN_KEY);
+      localStorage.removeItem(LS_ACCESS_TOKEN_KEY);
+      localStorage.removeItem(LS_USER_CLAIMS_KEY);
+    }
+
+    function getIdToken() {
+      return localStorage.getItem(LS_ID_TOKEN_KEY);
+    }
+
+    function getUserClaims() {
+      const raw = localStorage.getItem(LS_USER_CLAIMS_KEY);
+      if (!raw) return null;
+      try {
+        return JSON.parse(raw);
+      } catch {
+        return null;
+      }
+    }
+
+    // Pending invite helpers
+    function setPendingInviteId(id) {
+      try {
+        localStorage.setItem(LS_PENDING_INVITE_KEY, id);
+      } catch (e) {
+        console.warn('Unable to persist pending invite', e);
+      }
+    }
+
+    function getPendingInviteId() {
+      try {
+        return localStorage.getItem(LS_PENDING_INVITE_KEY);
+      } catch {
+        return null;
+      }
+    }
+
+    function clearPendingInviteId() {
+      try {
+        localStorage.removeItem(LS_PENDING_INVITE_KEY);
+      } catch (e) {
+        console.warn('Unable to clear pending invite', e);
+      }
+    }
+
+    // === Circle helpers ===
+    function getCircleLabel(id) {
+      return CIRCLE_LABELS[id] || id;
+    }
+
+    function getSelectedCircleId() {
+      return circleSelect.value || 'behrens';
+    }
+
+    function saveSelectedCircle() {
+      const id = getSelectedCircleId();
+      try {
+        localStorage.setItem(LS_SELECTED_CIRCLE_KEY, id);
+      } catch (e) {
+        console.warn('Unable to persist selected circle', e);
+      }
+    }
+
+    function restoreSelectedCircle() {
+      let stored = null;
+      try {
+        stored = localStorage.getItem(LS_SELECTED_CIRCLE_KEY);
+      } catch {
+        stored = null;
+      }
+      if (stored && [...circleSelect.options].some(o => o.value === stored)) {
+        circleSelect.value = stored;
+      }
+    }
+
+    function setStatus(text, state) {
+      statusPill.textContent = text;
+      statusPill.className = 'status-pill' + (state ? ' ' + state : '');
+    }
+
+    function setDebug(text) {
+      debugStatus.textContent = 'Last action: ' + text;
+    }
+
+    function renderMessages(items) {
+      messagesEl.innerHTML = '';
+
+      if (!items || items.length === 0) {
+        const div = document.createElement('div');
+        div.className = 'empty';
+        div.textContent = 'No messages yet. Be the first to say something!';
+        messagesEl.appendChild(div);
+        return;
+      }
+
+      // Normalize messageType for older items
+      items.forEach(it => {
+        if (!it.messageType) {
+          it.messageType = 'answer';
+        }
+      });
+
+      // --- Find and sort questions (newest → oldest) ---
+      const questions = items
+        .filter(it => it.messageType === 'question')
+        .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+
+      if (questions.length === 0) {
+        // Fallback: just show everything in descending time order
+        items
+          .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+          .forEach(item => {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'message';
+
+            const meta = document.createElement('div');
+            meta.className = 'meta';
+
+            const author = document.createElement('span');
+            author.className = 'author';
+            author.textContent = item.author || 'Unknown';
+
+            const ts = document.createElement('span');
+            const date = item.createdAt ? new Date(item.createdAt) : null;
+            ts.textContent = date ? date.toLocaleString() : '';
+
+            meta.appendChild(author);
+            meta.appendChild(ts);
+
+            const text = document.createElement('div');
+            text.className = 'text';
+            text.textContent = item.text || '';
+
+            wrapper.appendChild(meta);
+            wrapper.appendChild(text);
+            messagesEl.appendChild(wrapper);
+          });
+        return;
+      }
+
+      // Clamp questionsShownCount so it never exceeds available questions
+      if (questionsShownCount > questions.length) {
+        questionsShownCount = questions.length;
+      }
+
+      const questionsToShow = questions.slice(0, questionsShownCount);
+
+      // --- Render each question + its answers ---
+      questionsToShow.forEach((qItem, idx) => {
+        const isLatest = idx === 0;
+
+        // Keep currentQuestionId in sync with the most recent question
+        if (isLatest && qItem.messageId) {
+          currentQuestionId = qItem.messageId;
+        }
+
+        const questionBlock = document.createElement('div');
+        questionBlock.className = 'current-question-wrapper';
+
+        const label = document.createElement('div');
+        label.className = 'current-question-label';
+        label.textContent = isLatest ? 'Current Question' : 'Previous Question';
+        questionBlock.appendChild(label);
+
+        const qWrapper = document.createElement('div');
+        qWrapper.className = 'message question';
+
+        const qMeta = document.createElement('div');
+        qMeta.className = 'meta';
+
+        const qAuthor = document.createElement('span');
+        qAuthor.className = 'author';
+        qAuthor.textContent = qItem.author || 'Unknown';
+
+        const qTs = document.createElement('span');
+        const qDate = qItem.createdAt ? new Date(qItem.createdAt) : null;
+        qTs.textContent = qDate ? qDate.toLocaleString() : '';
+
+        qMeta.appendChild(qAuthor);
+        qMeta.appendChild(qTs);
+
+        const qText = document.createElement('div');
+        qText.className = 'text';
+        qText.textContent = qItem.text || '';
+
+        qWrapper.appendChild(qMeta);
+        qWrapper.appendChild(qText);
+        questionBlock.appendChild(qWrapper);
+
+        messagesEl.appendChild(questionBlock);
+
+        // Answers for this question
+        const answers = items.filter(it =>
+          it.messageType !== 'question' &&
+          it.questionId === qItem.messageId
+        );
+
+        if (answers.length > 0) {
+          const answersHeader = document.createElement('div');
+          answersHeader.className = 'answers-header';
+          answersHeader.textContent = 'Answers';
+          messagesEl.appendChild(answersHeader);
+
+          // Newest → oldest within this question
+          answers
+            .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+            .forEach(item => {
+              const wrapper = document.createElement('div');
+              wrapper.className = 'message';
+
+              const meta = document.createElement('div');
+              meta.className = 'meta';
+
+              const author = document.createElement('span');
+              author.className = 'author';
+              author.textContent = item.author || 'Unknown';
+
+              const ts = document.createElement('span');
+              const date = item.createdAt ? new Date(item.createdAt) : null;
+              ts.textContent = date ? date.toLocaleString() : '';
+
+              meta.appendChild(author);
+              meta.appendChild(ts);
+
+              const text = document.createElement('div');
+              text.className = 'text';
+              text.textContent = item.text || '';
+
+              wrapper.appendChild(meta);
+              wrapper.appendChild(text);
+              messagesEl.appendChild(wrapper);
+            });
+        } else {
+          const div = document.createElement('div');
+          div.className = 'empty';
+          div.textContent = 'No one has answered this question yet.';
+          messagesEl.appendChild(div);
+        }
+      });
+
+      // --- "Show previous question" button if we have more to reveal ---
+      if (questionsShownCount < questions.length) {
+        const moreWrapper = document.createElement('div');
+        moreWrapper.style.display = 'flex';
+        moreWrapper.style.justifyContent = 'center';
+        moreWrapper.style.marginTop = '0.75rem';
+
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'load-more-questions';
+        btn.textContent = '▼ Show previous question';
+
+        btn.addEventListener('click', () => {
+          questionsShownCount += 1;
+          renderMessages(items);  // re-render with one more question visible
+        });
+
+        moreWrapper.appendChild(btn);
+        messagesEl.appendChild(moreWrapper);
+      }
+    }
+
+    // === Auth UI helpers ===
+    function parseTokensFromHash() {
+      const hash = window.location.hash;
+      if (!hash || hash.length < 2) return;
+      const params = new URLSearchParams(hash.substring(1));
+      const idToken = params.get('id_token');
+      const accessToken = params.get('access_token');
+      if (idToken) {
+        setTokens(idToken, accessToken);
+        setDebug('Parsed tokens from Cognito redirect');
+      }
+      window.location.hash = '';
+    }
+
+    function updateAuthUi() {
+      const token = getIdToken();
+      const claims = getUserClaims();
+
+      if (token && claims) {
+        const name = claims.name || claims.email || claims['cognito:username'] || 'Signed in';
+        userInfoEl.textContent = `${name}`;
+        authButton.textContent = 'Sign out';
+        authButton.onclick = logout;
+            // SHOW main UI, HIDE splash
+        if (signedInMain) signedInMain.style.display = '';
+        if (signedOutSplash) signedOutSplash.style.display = 'none';
+      } else {
+        userInfoEl.textContent = 'Not signed in';
+        authButton.textContent = 'Sign in';
+        authButton.onclick = login;
+            // HIDE main UI, SHOW splash
+        if (signedInMain) signedInMain.style.display = 'none';
+        if (signedOutSplash) signedOutSplash.style.display = 'block';
+      }
+
+      updateInviteSectionVisibility();
+    }
+
+    function login() {
+      const url = new URL(COGNITO_HOSTED_UI + '/oauth2/authorize');
+      url.searchParams.set('client_id', COGNITO_CLIENT_ID);
+      url.searchParams.set('response_type', 'token'); // implicit flow
+      url.searchParams.set('scope', COGNITO_SCOPE);
+      url.searchParams.set('redirect_uri', REDIRECT_URI);
+      window.location.href = url.toString();
+    }
+
+    function maybeHandleExpiredToken(res, data, contextLabel) {
+      const msg = (data && data.message) ? String(data.message) : '';
+
+      if (res.status === 401 && msg.toLowerCase().includes('expired')) {
+        // Session is no good anymore
+        clearTokens();
+
+        setStatus('Session expired – redirecting to sign in…', 'err');
+        setDebug((contextLabel || 'API call') + ': token expired, redirecting to Cognito');
+
+        // Give the UI a moment to paint, then go to Cognito
+        setTimeout(() => {
+          login();   // uses your existing Cognito hosted UI flow
+        }, 500);
+
+        return true; // we handled it
+      }
+
+      return false;  // not an expired-token case
+    }
+
+
+    function logout() {
+      clearTokens();
+      const url = new URL(COGNITO_HOSTED_UI + '/logout');
+      url.searchParams.set('client_id', COGNITO_CLIENT_ID);
+      url.searchParams.set('logout_uri', REDIRECT_URI);
+      window.location.href = url.toString();
+    }
+
+    // === Invite + members + prompts visibility ===
+    function updateInviteSectionVisibility() {
+      const token = getIdToken();
+      const hasCircle = !!getSelectedCircleId();
+      const show = token && hasCircle;
+
+      if (inviteSection) {
+        inviteSection.style.display = show ? 'block' : 'none';
+      }
+      if (membersSection) {
+        membersSection.style.display = show ? 'block' : 'none';
+      }
+      if (promptsSection) {
+        promptsSection.style.display = show ? 'block' : 'none';
+      }
+    }
+
+    // === Invite UI helpers ===
+    async function onInviteClick() {
+      if (!inviteEmailInput || !inviteResult) return;
+
+      const email = inviteEmailInput.value.trim();
+      if (!email) {
+        inviteResult.textContent = 'Please enter an email address.';
+        return;
+      }
+
+      const token = getIdToken();
+      if (!token) {
+        inviteResult.textContent = 'You must be signed in to send invites.';
+        return;
+      }
+
+      const circleId = getSelectedCircleId();
+      if (!circleId) {
+        inviteResult.textContent = 'Please select a circle first.';
+        return;
+      }
+
+      inviteResult.textContent = 'Creating invitation…';
+
+      try {
+        const res = await fetch(`/api/circles/${encodeURIComponent(circleId)}/invitations`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + token,
+          },
+          body: JSON.stringify({
+            email,
+            role: 'member',
+            expiresInDays: 7,
+          }),
+        });
+
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok) {
+          console.error('Invite error:', data);
+          inviteResult.textContent = `Error creating invite: ${data.message || res.statusText}`;
+          // NEW: handle expired token -> redirect to Cognito
+          if (maybeHandleExpiredToken(res, data, 'GET /api/circles')) {
+            return; // we’re redirecting, don’t do anything else
+          }
+          return;
+        }
+
+        console.log('Invite created:', data);
+
+        inviteResult.innerHTML = `
+          Invitation created.<br>
+          <small>Share this link:</small><br>
+          Emails for the invitation are NOT automated yet!<br>
+          <code>${data.inviteUrl}</code>
+        `;
+      } catch (err) {
+        console.error('Network error creating invite:', err);
+        inviteResult.textContent = 'Network error creating invite.';
+      }
+    }
+
+    // === Circle members ===
+    function renderCircleMembers(members) {
+      if (!membersBody) return;
+
+      if (!members || members.length === 0) {
+        membersBody.textContent = 'No other members in this circle yet.';
+        membersBody.className = 'members-body empty';
+        return;
+      }
+
+      let html = '<ul class="members-list">';
+      for (const m of members) {
+        const id = m.userId ? (m.userId.substring(0, 8) + '…') : 'Unknown user';
+        const role = m.role || 'member';
+        const joined = m.joinedAt ? new Date(m.joinedAt).toLocaleDateString() : null;
+
+        html += '<li>';
+        html += id;
+        html += ` <span class="members-role">(${role}`;
+        if (joined) {
+          html += ` · joined ${joined}`;
+        }
+        html += ')</span>';
+        html += '</li>';
+      }
+      html += '</ul>';
+
+      membersBody.innerHTML = html;
+      membersBody.className = 'members-body';
+    }
+
+    async function loadCircleMembers() {
+      if (!membersBody) return;
+
+      const token = getIdToken();
+      if (!token) {
+        membersBody.textContent = 'Please sign in to view circle members.';
+        membersBody.className = 'members-body empty';
+        setDebug('Blocked /api/circles/members – no id_token');
+        return;
+      }
+
+      const circleId = getSelectedCircleId();
+      if (!circleId) {
+        membersBody.textContent = 'Please select a circle first.';
+        membersBody.className = 'members-body empty';
+        return;
+      }
+
+      membersBody.textContent = 'Loading members…';
+      membersBody.className = 'members-body empty';
+
+      try {
+        const res = await fetch(`/api/circles/members?familyId=${encodeURIComponent(circleId)}`, {
+          method: 'GET',
+          headers: {
+            'Authorization': 'Bearer ' + token,
+          },
+        });
+
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok) {
+          console.warn('Members API error:', data);
+          membersBody.textContent = data.message || ('Error loading members (' + res.status + ')');
+          membersBody.className = 'members-body empty';
+          setStatus('Members error ' + res.status, 'err');
+          setDebug('GET /api/circles/members failed: ' + (data.message || 'unknown error'));
+          // NEW: handle expired token -> redirect to Cognito
+          if (maybeHandleExpiredToken(res, data, 'GET /api/circles')) {
+            return; // we’re redirecting, don’t do anything else
+          }
+          return;
+        }
+
+        setStatus('Members loaded', 'ok');
+        setDebug('GET /api/circles/members OK for circle=' + circleId);
+
+        renderCircleMembers(data.members || []);
+      } catch (err) {
+        console.error('Network error fetching circle members', err);
+        membersBody.textContent = 'Network error loading members.';
+        membersBody.className = 'members-body empty';
+        setStatus('Network error', 'err');
+        setDebug('Network error fetching circle members');
+      }
+    }
+
+    // === Prompt ideas (Bedrock-powered) ===
+    function renderPrompts(prompts) {
+      if (!promptsBody) return;
+
+      if (!prompts || prompts.length === 0) {
+        promptsBody.textContent = 'No prompt ideas yet. Try again in a moment.';
+        promptsBody.className = 'prompts-body empty';
+        return;
+      }
+
+      let html = '<ul class="prompts-list">';
+      for (const p of prompts) {
+        const safe = (typeof p === 'string') ? p : '';
+        if (!safe) continue;
+        html += '<li data-prompt="' + safe.replace(/"/g, '&quot;') + '">';
+        html += '<span class="prompt-text">' + safe + '</span>';
+        html += '<span class="prompt-hint">Click to use this</span>';
+        html += '</li>';
+      }
+      html += '</ul>';
+
+      promptsBody.innerHTML = html;
+      promptsBody.className = 'prompts-body';
+
+      // Attach click handlers so a click drops text into the message box
+      const items = promptsBody.querySelectorAll('.prompts-list li');
+      items.forEach(li => {
+        li.addEventListener('click', () => {
+          const text = li.getAttribute('data-prompt') || li.textContent || '';
+          if (textInput) {
+            textInput.value = text;
+            textInput.focus();
+          }
+
+          // Mark the next message as a question
+          nextMessageType = 'question';
+          currentQuestionId = null;           // we’re about to create a new one
+          if (isQuestionToggle) {
+            isQuestionToggle.checked = true;  // make it visible to the user
+          }
+
+          setDebug('Applied prompt as next question');
+        });
+      });
+
+    }
+
+    function resetCircleDependentUi() {
+      // Reset prompts
+      if (promptsBody) {
+        promptsBody.textContent = 'Click “Suggest prompts” to get conversation starters for this circle.';
+        promptsBody.className = 'prompts-body empty';
+      }
+
+      // Reset members
+      if (membersBody) {
+        const token = getIdToken();
+        if (!token) {
+          membersBody.textContent = 'Sign in and select a circle, then click “Who’s in this circle?”.';
+        } else {
+          membersBody.textContent = 'Click “Who’s in this circle?” to load members for this circle.';
+        }
+        membersBody.className = 'members-body empty';
+      }
+
+      // Reset invite section
+      if (inviteEmailInput) {
+        inviteEmailInput.value = '';
+      }
+      if (inviteResult) {
+        inviteResult.textContent = '';
+      }
+    }
+
+
+    async function loadPrompts() {
+      if (!promptsBody) return;
+
+      const token = getIdToken();
+      if (!token) {
+        promptsBody.textContent = 'Please sign in to get AI prompt ideas.';
+        promptsBody.className = 'prompts-body empty';
+        setDebug('Blocked /api/prompts – no id_token');
+        return;
+      }
+
+      const circleId = getSelectedCircleId() || 'behrens';
+
+      promptsBody.textContent = 'Asking the AI for ideas…';
+      promptsBody.className = 'prompts-body empty';
+      setStatus('Loading prompt ideas…', '');
+      setDebug('POST /api/prompts for circle=' + circleId);
+
+      try {
+        const res = await fetch('/api/prompts', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + token,
+          },
+          body: JSON.stringify({
+            circleId,
+            count: 4   // number of suggestions returned
+          }),
+        });
+
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok) {
+          console.warn('Prompts API error:', data);
+          promptsBody.textContent = data.message || ('Error loading prompts (' + res.status + ')');
+          promptsBody.className = 'prompts-body empty';
+          setStatus('Prompt error ' + res.status, 'err');
+          setDebug('POST /api/prompts failed: ' + (data.message || 'unknown error'));
+          // NEW: handle expired token -> redirect to Cognito
+          if (maybeHandleExpiredToken(res, data, 'GET /api/circles')) {
+            return; // we’re redirecting, don’t do anything else
+          }
+          return;
+        }
+
+        const prompts = Array.isArray(data.prompts) ? data.prompts : [];
+        setStatus('Prompt ideas ready', 'ok');
+        setDebug('POST /api/prompts OK for circle=' + circleId);
+        renderPrompts(prompts);
+      } catch (err) {
+        console.error('Network error fetching prompts:', err);
+        promptsBody.textContent = 'Network error getting prompt ideas.';
+        promptsBody.className = 'prompts-body empty';
+        setStatus('Network error', 'err');
+        setDebug('Network error fetching prompts');
+      }
+    }
+
+    // === Load allowed circles from /api/circles/config ===
+    async function loadUserCircles() {
+      const token = getIdToken();
+      if (!token) {
+        console.log('No token; skipping /api/circles/config');
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/circles/config', {
+          method: 'GET',
+          headers: {
+            'Authorization': 'Bearer ' + token,
+          },
+        });
+
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok) {
+          console.warn('Failed to load circle config:', res.status, data);
+          return;
+        }
+
+        const circles = Array.isArray(data.circles) ? data.circles : [];
+        if (circles.length === 0) {
+          console.warn('No circles returned for user; keeping existing options');
+          return;
+        }
+
+        // Rebuild the <select> options from server data
+        circleSelect.innerHTML = '';
+        for (const c of circles) {
+          const opt = document.createElement('option');
+          opt.value = c.circleId;
+          opt.textContent = c.name || c.circleId;
+          circleSelect.appendChild(opt);
+
+          // Keep CIRCLE_LABELS in sync for analytics
+          if (c.circleId) {
+            CIRCLE_LABELS[c.circleId] = c.name || c.circleId;
+          }
+        }
+
+        // Try to restore previously saved circle, if it still exists
+        restoreSelectedCircle();
+
+        // If nothing selected, default to the first option
+        if (!circleSelect.value && circleSelect.options.length > 0) {
+          circleSelect.value = circleSelect.options[0].value;
+        }
+
+        updateInviteSectionVisibility();
+        console.log('Loaded circles from config:', circles);
+      } catch (err) {
+        console.error('Error loading circle config', err);
+      }
+    }
+
+    // === API calls (JWT-protected) ===
+    async function loadMessages() {
+      const token = getIdToken();
+      if (!token) {
+        setStatus('Please sign in to view messages', '');
+        setDebug('No id_token found; not calling API');
+        renderMessages([]);
+        return;
+      }
+
+      const familyId = getSelectedCircleId();
+      setStatus('Loading…', '');
+      setDebug(`Fetching /api/circles for circle=${familyId}`);
+
+      try {
+        const res = await fetch(`/api/circles?familyId=${encodeURIComponent(familyId)}`, {
+          method: 'GET',
+          headers: {
+            'Authorization': 'Bearer ' + token,
+          },
+        });
+
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok) {
+          setStatus('API error ' + res.status, 'err');
+          setDebug('GET /api/circles failed: ' + (data.message || 'unknown error'));
+          // NEW: handle expired token -> redirect to Cognito
+          if (maybeHandleExpiredToken(res, data, 'GET /api/circles')) {
+            return; // we’re redirecting, don’t do anything else
+          }
+          renderMessages([]);
+          return;
+        }
+
+        setStatus('Loaded ' + (data.count ?? 0) + ' message(s)', 'ok');
+        setDebug(`GET /api/circles OK for circle=${familyId}`);
+        renderMessages(data.items || []);
+      } catch (err) {
+        console.error(err);
+        setStatus('Network error', 'err');
+        setDebug('Network error fetching messages');
+        renderMessages([]);
+      }
+    }
+
+    async function postMessage(evt) {
+      evt.preventDefault();
+
+      const token = getIdToken();
+      if (!token) {
+        setStatus('Please sign in first', 'err');
+        setDebug('Blocked POST – no id_token');
+        return;
+      }
+
+      const text = textInput.value.trim();
+      if (!text) {
+        setDebug('Ignored empty message');
+        return;
+      }
+
+      const familyId = getSelectedCircleId();
+
+      // Decide messageType to send
+      let messageTypeToSend = nextMessageType;  // "question" or "answer"
+
+      // If you have a checkbox toggle for questions, you can also honor that here:
+      const isQuestionToggle = document.getElementById('isQuestionToggle');
+      if (isQuestionToggle && isQuestionToggle.checked) {
+        messageTypeToSend = 'question';
+      }
+
+      const payload = {
+        familyId,
+        text,
+        messageType: messageTypeToSend,
+      };
+
+      // Answers should include questionId
+      if (messageTypeToSend !== 'question' && currentQuestionId) {
+        payload.questionId = currentQuestionId;
+      }
+
+      submitBtn.disabled = true;
+      setStatus('Posting…', '');
+      setDebug(`POST /api/circles for circle=${familyId}`);
+
+      try {
+        const res = await fetch('/api/circles', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + token,
+          },
+          body: JSON.stringify(payload),
+        });
+
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok) {
+          setStatus('Post failed ' + res.status, 'err');
+          setDebug('POST failed: ' + (data.message || 'unknown error'));
+        } else {
+          const saved = data || {};
+
+          // If we just created a question, remember its id as the current question
+          if (messageTypeToSend === 'question' && saved.messageId) {
+            currentQuestionId = saved.messageId;
+          }
+
+          // Reset for next message
+          nextMessageType = 'answer';
+          if (isQuestionToggle) isQuestionToggle.checked = false;
+
+          setStatus('Message posted', 'ok');
+          setDebug(`POST /api/circles OK for circle=${familyId}`);
+          textInput.value = '';
+          await loadMessages();
+        }
+      } catch (err) {
+        console.error(err);
+        setStatus('Network error', 'err');
+        setDebug('Network error posting message');
+      } finally {
+        submitBtn.disabled = false;
+      }
+    }
+
+
+
+
+    // === Analytics / stats ===
+    function renderStats(data) {
+      if (!analyticsSummary || !analyticsMembers) return;
+
+      if (!data) {
+        analyticsSummary.textContent = 'No analytics available.';
+        analyticsMembers.innerHTML = '';
+        return;
+      }
+
+      const totalCircles = data.totalCircles ?? 0;
+      const totalMembers = data.totalMembers ?? 0;
+      const totalMemberships = data.totalMemberships ?? 0;
+
+      analyticsSummary.innerHTML = `
+        <div>Total circles: <strong>${totalCircles}</strong></div>
+        <div>Total unique members: <strong>${totalMembers}</strong></div>
+        <div>Total memberships (user–circle links): <strong>${totalMemberships}</strong></div>
+      `;
+
+      const list = Array.isArray(data.membersByCircle) ? data.membersByCircle : [];
+      if (list.length === 0) {
+        analyticsMembers.textContent = 'No membership data yet.';
+        return;
+      }
+
+      let html = '<table class="analytics-table"><thead><tr><th>Circle</th><th>Members</th></tr></thead><tbody>';
+      for (const row of list) {
+        const label = getCircleLabel(row.circleId);
+        html += `<tr><td>${label}</td><td>${row.memberCount ?? 0}</td></tr>`;
+      }
+      html += '</tbody></table>';
+      analyticsMembers.innerHTML = html;
+    }
+
+    async function loadStats() {
+      if (!analyticsSummary || !analyticsMembers) return;
+
+      const token = getIdToken();
+      if (!token) {
+        analyticsSummary.textContent = 'Sign in to view analytics.';
+        analyticsMembers.innerHTML = '';
+        setStatus('Please sign in to view analytics', '');
+        setDebug('No id_token found; not calling /api/stats');
+        return;
+      }
+
+      setStatus('Loading analytics…', '');
+      setDebug('Fetching /api/stats');
+
+      try {
+        const res = await fetch('/api/stats', {
+          method: 'GET',
+          headers: {
+            'Authorization': 'Bearer ' + token,
+          },
+        });
+
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok) {
+          setStatus('Analytics error ' + res.status, 'err');
+          setDebug('GET /api/stats failed: ' + (data.message || 'unknown error'));
+          // NEW: handle expired token -> redirect to Cognito
+          if (maybeHandleExpiredToken(res, data, 'GET /api/circles')) {
+            return; // we’re redirecting, don’t do anything else
+          }
+          analyticsSummary.textContent = 'Error loading analytics.';
+          analyticsMembers.innerHTML = '';
+          return;
+        }
+
+        setStatus('Analytics loaded', 'ok');
+        setDebug('GET /api/stats OK');
+        renderStats(data);
+      } catch (err) {
+        console.error(err);
+        setStatus('Network error', 'err');
+        setDebug('Network error fetching analytics');
+        analyticsSummary.textContent = 'Network error loading analytics.';
+        analyticsMembers.innerHTML = '';
+      }
+    }
+
+    // === Invitation acceptance ===
+    async function maybeAcceptPendingInvite() {
+      const inviteId = getPendingInviteId();
+      if (!inviteId) {
+        return;
+      }
+
+      const token = getIdToken();
+      if (!token) {
+        setDebug('Pending invite found; sign in to accept it.');
+        return;
+      }
+
+      setStatus('Accepting invite…', '');
+      setDebug('Accepting invitation ' + inviteId);
+
+      try {
+        const res = await fetch('/api/circles/invitations/accept', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + token,
+          },
+          body: JSON.stringify({ invitationId: inviteId }),
+        });
+
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok) {
+          console.warn('Accept invite error:', data);
+          setStatus('Invite error ' + res.status, 'err');
+          setDebug('Accept failed: ' + (data.message || 'unknown error'));
+          return;
+        }
+
+        clearPendingInviteId();
+
+        setStatus('Invitation accepted for ' + (data.circleName || data.circleId), 'ok');
+        setDebug('Invitation accepted into circle=' + (data.circleId || '?'));
+
+        // Reload circles so the new membership shows up
+        await loadUserCircles();
+
+        if (data.circleId) {
+          circleSelect.value = data.circleId;
+          updateInviteSectionVisibility();
+          await loadMessages();
+        }
+      } catch (err) {
+        console.error('Network error accepting invite:', err);
+        setStatus('Network error accepting invite', 'err');
+        setDebug('Network error accepting invite');
+      }
+    }
+
+    // View switching
+    function showMessagesView() {
+      if (messagesSection) messagesSection.style.display = '';
+      if (analyticsSection) analyticsSection.style.display = 'none';
+      if (tabMessages) tabMessages.classList.add('active');
+      if (tabAnalytics) tabAnalytics.classList.remove('active');
+      setDebug('Switched to Messages view');
+    }
+
+    async function showAnalyticsView() {
+      if (messagesSection) messagesSection.style.display = 'none';
+      if (analyticsSection) analyticsSection.style.display = '';
+      if (tabMessages) tabMessages.classList.remove('active');
+      if (tabAnalytics) tabAnalytics.classList.add('active');
+      setDebug('Switched to Analytics view');
+      await loadStats();
+    }
+
+    form.addEventListener('submit', postMessage);
+
+    circleSelect.addEventListener('change', () => {
+      saveSelectedCircle();
+      updateInviteSectionVisibility();
+
+      questionsShownCount = 1;     // reset view for new circle
+      currentQuestionId = null;
+
+      loadMessages().catch(console.error);
+    });
+
+
+    // // Reload messages when the selected circle changes
+    // circleSelect.addEventListener('change', () => {
+    //   saveSelectedCircle();
+    //   updateInviteSectionVisibility();
+    //   resetCircleDependentUi(); 
+    //   loadMessages().catch(console.error);
+    // });
+
+    if (inviteButton) {
+      inviteButton.addEventListener('click', onInviteClick);
+    }
+
+    if (membersButton) {
+      membersButton.addEventListener('click', (e) => {
+        e.preventDefault();
+        loadCircleMembers().catch(console.error);
+      });
+    }
+
+    if (promptsButton) {
+      promptsButton.addEventListener('click', (e) => {
+        e.preventDefault();
+        loadPrompts().catch(console.error);
+      });
+    }
+
+    if (tabMessages) {
+      tabMessages.addEventListener('click', (e) => {
+        e.preventDefault();
+        showMessagesView();
+      });
+    }
+
+    if (tabAnalytics) {
+      tabAnalytics.addEventListener('click', (e) => {
+        e.preventDefault();
+        showAnalyticsView();
+      });
+    }
+
+    if (splashSignin) {
+      splashSignin.addEventListener('click', () => {
+        login();
+      });
+    }
+
+    // initial load
+    window.addEventListener('load', () => {
+      // 1) Capture ?invite=... from URL (if present)
+      try {
+        const url = new URL(window.location.href);
+        const inviteFromUrl = url.searchParams.get('invite');
+        if (inviteFromUrl) {
+          setPendingInviteId(inviteFromUrl);
+          setDebug('Found invite in URL; will accept after sign-in.');
+          // Clean the URL (remove ?invite=...) for nicer sharing
+          url.searchParams.delete('invite');
+          window.history.replaceState({}, document.title, url.toString());
+        }
+      } catch (e) {
+        console.warn('Error parsing invite from URL', e);
+      }
+
+      // 2) Parse any Cognito tokens from hash
+      parseTokensFromHash();
+      updateAuthUi();
+
+      // 3) Load allowed circles, then restore selection and messages, then try to accept pending invite
+      loadUserCircles()
+        .catch(err => {
+          console.error(err);
+        })
+        .finally(() => {
+          // Even if config fails, fall back to whatever is in the <select>
+          restoreSelectedCircle();
+          updateInviteSectionVisibility();
+          showMessagesView();
+          loadMessages().catch(console.error);
+          // If there's a pending invite and we're signed in, accept it
+          maybeAcceptPendingInvite().catch(console.error);
+        });
+    });
+  </script>
+
+  <!-- Small helper to toggle analytics from footer link -->
+  <script>
+    const analyticsLink = document.getElementById('analytics-link');
+    if (analyticsLink) {
+      analyticsLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (typeof showAnalyticsView === 'function' && typeof showMessagesView === 'function') {
+          const section = document.getElementById('analytics-section');
+          const visible = section && section.style.display !== 'none';
+          if (visible) {
+            showMessagesView();
+          } else {
+            showAnalyticsView();
+          }
+        }
+      });
+    }
+  </script>
+</body>
+</html>

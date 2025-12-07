@@ -30,7 +30,6 @@ tmp/
 # -------------------------
 # Static content you do NOT want in Git
 # -------------------------
-Circles/web/
 staticSites/
 Circles/secrets.txt
 Circles/seed-circle-tags.mjs

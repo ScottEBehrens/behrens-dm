@@ -1,0 +1,23 @@
+<svg
+  width="256"
+  height="256"
+  viewBox="0 0 256 256"
+  xmlns="http://www.w3.org/2000/svg"
+>
+  <!-- Dark background -->
+  <rect
+    width="256"
+    height="256"
+    fill="#020617"
+  />
+
+  <!-- Clean single blue ring (was green before) -->
+  <circle
+    cx="128"
+    cy="128"
+    r="78"
+    fill="none"
+    stroke="#1E40AF"
+    stroke-width="16"
+  />
+</svg>
