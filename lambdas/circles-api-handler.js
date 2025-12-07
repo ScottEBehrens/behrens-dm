@@ -1322,8 +1322,9 @@ exports.handler = async (event) => {
         return makeResponse(400, { message: "Invalid JSON body" });
       }
 
-      const familyId = payload.familyId || "behrens";
-      const text = payload.text && String(payload.text).trim();
+      const familyId = String(payload.familyId || "behrens").trim();
+      const rawText = payload.text;
+      const text = rawText && String(rawText).trim();
 
       if (!text) {
         return makeResponse(400, { message: 'Field "text" is required' });
@@ -1344,15 +1345,40 @@ exports.handler = async (event) => {
 
       // Author from JWT claims, not the client body
       const author = jwtAuthor || "unknown";
-
       const createdAt = new Date().toISOString();
+
+      // --- NEW: messageType / questionId / messageId handling ---
+
+      // messageType: default to "answer" unless explicitly "question"
+      const rawType =
+        payload.messageType && String(payload.messageType).trim().toLowerCase();
+      const messageType = rawType === "question" ? "question" : "answer";
+
+      // questionId: only used for answers, points to the question's messageId
+      const questionId =
+        payload.questionId && String(payload.questionId).trim()
+          ? String(payload.questionId).trim()
+          : null;
+
+      // messageId: always generate one if client didn't send it
+      const messageId =
+        payload.messageId && String(payload.messageId).trim()
+          ? String(payload.messageId).trim()
+          : `msg_${randomUUID()}`;
 
       const item = {
         familyId,
         createdAt,
         author,
         text,
+        messageId,
+        messageType,
       };
+
+      // Only store questionId for non-question messages
+      if (messageType !== "question" && questionId) {
+        item.questionId = questionId;
+      }
 
       console.log("Writing item:", item, "userId:", userId);
 
