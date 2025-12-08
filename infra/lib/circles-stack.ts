@@ -255,6 +255,10 @@ export class CirclesStack extends Stack {
     const circlesMembersResource = circlesResource.addResource('members');
     circlesMembersResource.addMethod('GET', lambdaIntegration, methodOptions);
 
+    // GET /api/circles/tags → list available tags for circles
+    const circlesTagsResource = circlesResource.addResource('tags');
+    circlesTagsResource.addMethod('GET', lambdaIntegration, methodOptions);
+
     // --- /api/prompts (POST) ---
     // Bedrock-backed prompt suggestions for the currently selected circle
     const promptsResource = apiBaseResource.addResource('prompts');

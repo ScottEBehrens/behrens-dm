@@ -38,8 +38,8 @@
       gap: 0.75rem;
     }
     .logo-circle img {
-      width: 32px;
-      height: 32px;
+      width: 40px;
+      height: 40px;
       display: block;
     }
     h1 {
@@ -93,10 +93,12 @@
       align-items: stretch;
       margin: 1.25rem 0 1.0rem;
     }
-    /* Remove instructional label text */
-    form label {
+
+    /* Remove only the instructional label in the main message composer */
+    #messageForm > label {
       display: none;
     }
+
     .circle-label {
       display: none;
     }
@@ -141,6 +143,18 @@
       justify-content: center;
       padding-inline: 1.2rem;
     }
+        /* Make the "+ New Circle" button more compact */
+    #newCircleButton {
+      font-size: 0.8rem;
+      padding: 0.25rem 0.6rem;
+      border-radius: 999px;
+      align-self: center;
+      opacity: 0.9;
+    }
+
+    #newCircleButton:hover {
+      opacity: 1;
+    }
 
     .load-more-questions {
       margin-top: 0.25rem;
@@ -169,6 +183,43 @@
       opacity: 0.6;
       cursor: default;
     }
+
+    /* Compact styling for the circle dropdown selector */
+    #circleSelect {
+      padding: 0.15rem 0.5rem;      /* reduce internal padding vertically */
+      font-size: 0.85rem;           /* slightly smaller font */
+      line-height: 1.1;             /* prevents tall native rendering */
+      height: 28px;                 /* force consistent compact height */
+      min-height: 28px;             /* safety */
+      border-radius: 6px;           /* aesthetic, optional */
+    }
+
+    #submitBtn {
+      align-self: center;       /* keeps it from stretching vertically */
+      padding: 0.55rem 1.1rem;  /* match global button */
+      font-size: 0.9rem;        /* match global button */
+    }
+
+    /* Make the "+ New Circle" button small and secondary */
+    #newCircleButton {
+      font-size: 0.8rem;
+      padding: 0.2rem 0.7rem;
+      border-radius: 999px;
+      align-self: center;
+      opacity: 0.9;
+    }
+
+    #newCircleButton:hover {
+      opacity: 1;
+    }
+
+    /* Make the Sign in / Sign out button match the smaller style */
+    .user-auth #authButton {
+      font-size: 0.8rem;
+      padding: 0.25rem 0.8rem;
+      border-radius: 999px;
+    }
+
 
     .signed-out-splash {
       padding: 1.5rem 0 1.25rem;
@@ -435,6 +486,77 @@
       font-size: 0.8rem;
     }
 
+    /* Create Circle view */
+    .create-circle-panel {
+      margin-top: 1.25rem;
+      padding: 1rem 1.25rem;
+      border-radius: 0.75rem;
+      border: 1px solid #1f2937;
+      background: #020617;
+    }
+
+    .create-circle-panel h2 {
+      margin: 0 0 0.5rem 0;
+      font-size: 1.2rem;
+    }
+
+    /* Override global form layout for Create Circle panel */
+    #createCircleForm {
+      display: block;      /* stack rows vertically */
+      margin: 0;           /* let the panel control spacing */
+    }
+
+
+    .create-circle-intro {
+      margin: 0 0 1rem 0;
+      font-size: 0.85rem;
+      color: #9ca3af;
+    }
+
+    .create-circle-panel .form-row {
+      margin-bottom: 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+
+    .create-circle-panel input[type="text"],
+    .create-circle-panel textarea {
+      width: 100%;
+      padding: 0.5rem 0.75rem;
+      border-radius: 0.5rem;
+      border: 1px solid #374151;
+      background: #020617;
+      color: #e5e7eb;
+    }
+
+    .create-circle-panel input[type="text"]:focus,
+    .create-circle-panel textarea:focus {
+      outline: none;
+      border-color: #60a5fa;
+      box-shadow: 0 0 0 1px #60a5fa33;
+    }
+
+    .create-circle-panel .tag-options {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem 1rem;
+      font-size: 0.85rem;
+    }
+
+    .create-circle-panel .form-actions {
+      margin-top: 0.5rem;
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    .form-error {
+      margin-top: 0.5rem;
+      font-size: 0.8rem;
+      color: #fca5a5;
+    }
+
+
     /* Footer */
     .footer-row {
       margin-top: 1.25rem;
@@ -466,7 +588,7 @@
           <img src="/circle.svg" alt="Circles logo">
         </div>
         <div>
-          <h1>Circles – Messages</h1>
+          <h1>Circles</h1>
         </div>
       </div>
       <div class="user-auth">
@@ -494,61 +616,113 @@
 
       <!-- Signed-in main content (what you already have today) -->
       <div id="signed-in-main">
-        <form id="messageForm">
-          <!-- label kept only for accessibility, hidden via CSS -->
-          <label for="textInput">Post a new message</label>
 
-          <select id="circleSelect">
-            <!-- Defaults; will be replaced by /api/circles/config when signed in -->
-            <option value="devteam">Circles Dev Team</option>
-          </select>
+        <!-- Main app view (messages, prompts, invites, members) -->
+        <div id="main-view">
+          <form id="messageForm">
+            <!-- label kept only for accessibility, hidden via CSS -->
+            <label for="textInput">Post a new message</label>
 
-          <textarea id="textInput" placeholder="Type your message..."></textarea>
-          <label class="question-toggle">
-          <input type="checkbox" id="isQuestionToggle">
-          Make Question
-          </label>
-          <button id="submitBtn" type="submit">Post</button>
-        </form>
+            <select id="circleSelect">
+              <!-- Defaults; will be replaced by /api/circles/config when signed in -->
+              <option value="devteam">Circles Dev Team</option>
+            </select>
 
-        <div class="messages" id="messages">
-          <div class="empty">Loading messages…</div>
+            <!-- New circle button lives next to the circle selector -->
+            <button id="newCircleButton" type="button">New Circle</button>
+
+            <textarea id="textInput" placeholder="Type your message..."></textarea>
+            <label class="question-toggle">
+              <input type="checkbox" id="isQuestionToggle">
+              Make Question
+            </label>
+            <button id="submitBtn" type="submit">Post</button>
+          </form>
+
+          <div class="messages" id="messages">
+            <div class="empty">Loading messages…</div>
+          </div>
+
+          <!-- Prompt ideas section (between messages and invite) -->
+          <section id="prompts-section" class="prompts-section" style="display:none;">
+            <div class="prompts-header">
+              <strong>Need ideas?</strong>
+              <button id="prompts-button" type="button">Suggest prompts</button>
+            </div>
+            <div id="prompts-body" class="prompts-body empty">
+              <!-- Click “Suggest prompts” to get conversation starters for this circle. -->
+            </div>
+          </section>
+
+          <!-- Invite section -->
+          <section id="invite-section" class="invite-section" style="display:none;">
+            <!-- <div><strong>Invite Someone Into This Circle</strong></div> -->
+            <div class="invite-row">
+              <input type="email" id="invite-email" placeholder="name@example.com" />
+              <button id="invite-button" type="button">Invite to this Circle</button>
+            </div>
+            <div id="invite-result" class="invite-result"></div>
+          </section>
+
+          <!-- Circle members section -->
+          <section id="members-section" class="members-section" style="display:none;">
+            <div class="members-header">
+              <strong>Circle members</strong>
+              <button id="refresh-members" type="button">Who’s in this circle?</button>
+            </div>
+            <div id="members-body" class="members-body empty">
+              <!-- Sign in and select a circle, then click “Who’s in this circle?”. -->
+            </div>
+          </section>
         </div>
 
-        <!-- Prompt ideas section (between messages and invite) -->
-        <section id="prompts-section" class="prompts-section" style="display:none;">
-          <div class="prompts-header">
-            <strong>Need ideas?</strong>
-            <button id="prompts-button" type="button">Suggest prompts</button>
-          </div>
-          <div id="prompts-body" class="prompts-body empty">
-            Click “Suggest prompts” to get conversation starters for this circle.
-          </div>
-        </section>
+        <!-- Create Circle view (initially hidden; we'll wire this up later) -->
+        <div id="create-circle-view" style="display:none;">
+          <section class="create-circle-panel">
+            <h2>Create a New Circle</h2>
+            <p class="create-circle-intro">
+              Give your circle a name and (optionally) a description and tags. You’ll be able to invite others after it’s created.
+            </p>
 
-        <!-- Invite section -->
-        <section id="invite-section" class="invite-section" style="display:none;">
-          <div><strong>Invite Someone Into This Circle</strong></div>
-          <div class="invite-row">
-            <input type="email" id="invite-email" placeholder="name@example.com" />
-            <button id="invite-button" type="button">Create invite</button>
-          </div>
-          <div id="invite-result" class="invite-result"></div>
-        </section>
+            <form id="createCircleForm">
+              <div class="form-row">
+                <label for="createCircleName">Circle name</label>
+                <input
+                  id="createCircleName"
+                  type="text"
+                  maxlength="80"
+                  placeholder="e.g., Behrens Family, Grandkids, Sunday Dinner Crew"
+                />
+              </div>
 
-        <!-- Circle members section -->
-        <section id="members-section" class="members-section" style="display:none;">
-          <div class="members-header">
-            <strong>Circle members</strong>
-            <button id="refresh-members" type="button">Who’s in this circle?</button>
-          </div>
-          <div id="members-body" class="members-body empty">
-            Sign in and select a circle, then click “Who’s in this circle?”.
-          </div>
-        </section>
+              <div class="form-row">
+                <label for="createCircleDescription">Description (optional)</label>
+                <textarea
+                  id="createCircleDescription"
+                  rows="3"
+                  placeholder="Description..."
+                ></textarea>
+              </div>
+
+              <div class="form-row">
+                <span>Tags (choose all that apply)</span>
+                <div class="tag-options" id="createCircleTagsContainer">
+                  <!-- Tags will be loaded dynamically -->
+                </div>
+              </div>
+
+              <div class="form-actions">
+                <button id="createCircleSubmit" type="button">Create circle</button>
+                <button id="createCircleCancel" type="button">Cancel</button>
+              </div>
+
+              <div id="createCircleError" class="form-error" style="display:none;"></div>
+            </form>
+          </section>
+        </div>
+
       </div>
     </section>
-
 
     <!-- Analytics / dashboard view (toggled via footer link) -->
     <section id="analytics-section" style="display:none;">
@@ -592,6 +766,17 @@
     const userInfoEl = document.getElementById('userInfo');
     const authButton = document.getElementById('authButton');
     const circleSelect = document.getElementById('circleSelect');
+    const newCircleButton = document.getElementById('newCircleButton'); 
+
+    const createCircleForm = document.getElementById('createCircleForm');
+    const createCircleNameInput = document.getElementById('createCircleName');
+    const createCircleDescriptionInput = document.getElementById('createCircleDescription');
+    const createCircleSubmitButton = document.getElementById('createCircleSubmit');
+    const createCircleCancelButton = document.getElementById('createCircleCancel');
+    const createCircleError = document.getElementById('createCircleError');
+
+    const createCircleTagsContainer = document.getElementById('createCircleTagsContainer');
+    let createCircleTagsLoaded = false;
 
     const inviteSection = document.getElementById('invite-section');
     const inviteEmailInput = document.getElementById('invite-email');
@@ -616,6 +801,24 @@
     const signedInMain = document.getElementById('signed-in-main');
     const signedOutSplash = document.getElementById('signed-out-splash');
     const splashSignin = document.getElementById('splash-signin');
+
+    const mainView = document.getElementById('main-view');
+    const createCircleView = document.getElementById('create-circle-view');
+
+    function showMainView() {
+      if (mainView) mainView.style.display = '';
+      if (createCircleView) createCircleView.style.display = 'none';
+    }
+
+    function showCreateCircleView() {
+      if (mainView) mainView.style.display = 'none';
+      if (createCircleView) createCircleView.style.display = '';
+
+      if (typeof loadCreateCircleTags === 'function') {
+        // Fire and forget; errors are logged inside
+        loadCreateCircleTags().catch(console.error);
+      }
+    }
 
     let currentQuestionId = null;        // messageId of current question for this circle
     let nextMessageType = 'answer';      // default
@@ -747,6 +950,115 @@
     function setDebug(text) {
       debugStatus.textContent = 'Last action: ' + text;
     }
+
+    function showCreateCircleError(message) {
+      if (!createCircleError) return;
+      if (message) {
+        createCircleError.textContent = message;
+        createCircleError.style.display = 'block';
+      } else {
+        createCircleError.textContent = '';
+        createCircleError.style.display = 'none';
+      }
+    }
+
+    async function createCircleRequest(name, description, tags) {
+      const token = getIdToken();
+      if (!token) {
+        throw new Error('You must be signed in to create a circle.');
+      }
+
+      const payload = {
+        action: 'createCircle',
+        name,
+        description,
+        tags,
+      };
+
+      setStatus('Creating circle…', '');
+      setDebug('POST /api/circles (createCircle)');
+
+      const res = await fetch('/api/circles', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + token,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        throw new Error(data.message || ('Failed to create circle: ' + res.status));
+      }
+
+      return data;
+    }
+
+    async function loadCreateCircleTags() {
+      if (!createCircleTagsContainer) return;
+
+      // Don’t reload every time unless you want to
+      if (createCircleTagsLoaded && createCircleTagsContainer.children.length > 0) {
+        return;
+      }
+
+      const token = getIdToken();
+      if (!token) {
+        // No tags if not signed in; silently return
+        return;
+      }
+
+      setStatus('Loading tags…', '');
+      setDebug('GET /api/circles/tags');
+
+      const res = await fetch('/api/circles/tags', {
+        method: 'GET',
+        headers: {
+          'Authorization': 'Bearer ' + token,
+        },
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        console.error('Failed to load tags', res.status, data);
+        setStatus('Failed to load tags', 'warn');
+        return;
+      }
+
+      const tags = Array.isArray(data.tags) ? data.tags : [];
+      createCircleTagsContainer.innerHTML = '';
+
+      if (tags.length === 0) {
+        const empty = document.createElement('div');
+        empty.textContent = 'No tags configured yet.';
+        empty.style.fontSize = '0.8rem';
+        empty.style.color = '#9ca3af';
+        createCircleTagsContainer.appendChild(empty);
+      } else {
+        tags.forEach((tag) => {
+          const label = document.createElement('label');
+
+          const input = document.createElement('input');
+          input.type = 'checkbox';
+          input.name = 'createCircleTags';
+          input.value = tag.tagKey;
+
+          const text = document.createTextNode(' ' + (tag.displayLabel || tag.tagKey));
+
+          label.appendChild(input);
+          label.appendChild(text);
+
+          createCircleTagsContainer.appendChild(label);
+        });
+      }
+
+      createCircleTagsLoaded = true;
+      setStatus('Tags loaded', 'ok');
+    }
+
 
     function renderMessages(items) {
       messagesEl.innerHTML = '';
@@ -952,6 +1264,9 @@
             // SHOW main UI, HIDE splash
         if (signedInMain) signedInMain.style.display = '';
         if (signedOutSplash) signedOutSplash.style.display = 'none';
+        if (typeof showMainView === 'function') {
+          showMainView();
+        }
       } else {
         userInfoEl.textContent = 'Not signed in';
         authButton.textContent = 'Sign in';
@@ -1089,19 +1404,28 @@
       if (!membersBody) return;
 
       if (!members || members.length === 0) {
-        membersBody.textContent = 'No other members in this circle yet.';
+        membersBody.textContent = 'No members found for this circle.';
         membersBody.className = 'members-body empty';
         return;
       }
 
       let html = '<ul class="members-list">';
       for (const m of members) {
-        const id = m.userId ? (m.userId.substring(0, 8) + '…') : 'Unknown user';
+        // Prefer the friendly displayName; fall back to truncated userId if needed
+        const label =
+          m.displayName ||
+          (m.userId ? m.userId.substring(0, 8) + '…' : 'Unknown user');
+
         const role = m.role || 'member';
         const joined = m.joinedAt ? new Date(m.joinedAt).toLocaleDateString() : null;
 
-        html += '<li>';
-        html += id;
+        html += '<li';
+        if (m.userId) {
+          // Optional: show raw userId as a tooltip for debugging
+          html += ` title="${m.userId}"`;
+        }
+        html += '>';
+        html += label;
         html += ` <span class="members-role">(${role}`;
         if (joined) {
           html += ` · joined ${joined}`;
@@ -1116,9 +1440,16 @@
     }
 
     async function loadCircleMembers() {
-      if (!membersBody) return;
+      console.log('loadCircleMembers: entered');
+
+      if (!membersBody) {
+        console.log('loadCircleMembers: no membersBody element, exiting');
+        return;
+      }
 
       const token = getIdToken();
+      console.log('loadCircleMembers: token present?', !!token);
+
       if (!token) {
         membersBody.textContent = 'Please sign in to view circle members.';
         membersBody.className = 'members-body empty';
@@ -1127,6 +1458,8 @@
       }
 
       const circleId = getSelectedCircleId();
+      console.log('loadCircleMembers: circleId from getSelectedCircleId() =', circleId);
+
       if (!circleId) {
         membersBody.textContent = 'Please select a circle first.';
         membersBody.className = 'members-body empty';
@@ -1137,6 +1470,7 @@
       membersBody.className = 'members-body empty';
 
       try {
+        console.log('loadCircleMembers: fetching members for circleId', circleId);
         const res = await fetch(`/api/circles/members?familyId=${encodeURIComponent(circleId)}`, {
           method: 'GET',
           headers: {
@@ -1145,6 +1479,7 @@
         });
 
         const data = await res.json().catch(() => ({}));
+        console.log('loadCircleMembers: response status', res.status, 'body', data);
 
         if (!res.ok) {
           console.warn('Members API error:', data);
@@ -1152,25 +1487,25 @@
           membersBody.className = 'members-body empty';
           setStatus('Members error ' + res.status, 'err');
           setDebug('GET /api/circles/members failed: ' + (data.message || 'unknown error'));
-          // NEW: handle expired token -> redirect to Cognito
           if (maybeHandleExpiredToken(res, data, 'GET /api/circles')) {
-            return; // we’re redirecting, don’t do anything else
+            return;
           }
           return;
         }
 
+        const members = Array.isArray(data.members) ? data.members : [];
+        renderCircleMembers(members);
         setStatus('Members loaded', 'ok');
-        setDebug('GET /api/circles/members OK for circle=' + circleId);
-
-        renderCircleMembers(data.members || []);
+        setDebug('Loaded ' + members.length + ' circle members.');
       } catch (err) {
-        console.error('Network error fetching circle members', err);
-        membersBody.textContent = 'Network error loading members.';
+        console.error('Error loading members:', err);
+        membersBody.textContent = 'Error loading members.';
         membersBody.className = 'members-body empty';
-        setStatus('Network error', 'err');
-        setDebug('Network error fetching circle members');
+        setStatus('Members error', 'err');
+        setDebug('GET /api/circles/members threw: ' + err.message);
       }
     }
+
 
     // === Prompt ideas (Bedrock-powered) ===
     function renderPrompts(prompts) {
@@ -1679,8 +2014,10 @@
     }
 
     if (membersButton) {
+      // console.log('Wiring membersButton click handler');  // DEBUG
       membersButton.addEventListener('click', (e) => {
         e.preventDefault();
+        // console.log('membersButton clicked');             // DEBUG
         loadCircleMembers().catch(console.error);
       });
     }
@@ -1689,6 +2026,71 @@
       promptsButton.addEventListener('click', (e) => {
         e.preventDefault();
         loadPrompts().catch(console.error);
+      });
+    }
+
+    // Create Circle: Cancel button
+    if (createCircleCancelButton) {
+      createCircleCancelButton.addEventListener('click', (e) => {
+        e.preventDefault();
+        showCreateCircleError('');
+        if (createCircleForm) {
+          createCircleForm.reset();
+        }
+        if (typeof showMainView === 'function') {
+          showMainView();
+        }
+      });
+    }
+
+    // Create Circle: Submit button
+    if (createCircleSubmitButton) {
+      createCircleSubmitButton.addEventListener('click', async (e) => {
+        e.preventDefault();
+        showCreateCircleError('');
+
+        if (!createCircleNameInput) return;
+
+        const rawName = createCircleNameInput.value || '';
+        const name = rawName.trim();
+        if (!name) {
+          showCreateCircleError('Circle name is required.');
+          return;
+        }
+
+        const description = createCircleDescriptionInput
+          ? (createCircleDescriptionInput.value || '').trim()
+          : '';
+
+        const tagCheckboxes = document.querySelectorAll('input[name="createCircleTags"]:checked');
+        const tags = Array.from(tagCheckboxes).map((cb) => cb.value);
+
+        try {
+          createCircleSubmitButton.disabled = true;
+          createCircleSubmitButton.textContent = 'Creating…';
+
+          await createCircleRequest(name, description, tags);
+
+          // Simplest V1: reload so the new circle appears in config & selector
+          window.location.hash = '';
+          window.location.reload();
+        } catch (err) {
+          console.error(err);
+          showCreateCircleError(err.message || 'Error creating circle.');
+          setStatus('Create circle failed', 'err');
+        } finally {
+          createCircleSubmitButton.disabled = false;
+          createCircleSubmitButton.textContent = 'Create circle';
+        }
+      });
+    }
+
+    if (newCircleButton) {
+      newCircleButton.addEventListener('click', (e) => {
+        e.preventDefault();
+        if (typeof showCreateCircleView === 'function') {
+          showCreateCircleView();
+        }
       });
     }
 

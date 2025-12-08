@@ -605,6 +605,7 @@ async function handleAcceptInvitation(event, context) {
     circleId,
     role: invitation.role || "member",
     joinedAt: nowIso,
+    displayName: jwtAuthor || userId, 
   };
 
   console.log("Creating/updating membership:", membershipItem);
@@ -794,6 +795,7 @@ async function handleGetCircleMembers(event, context) {
     userId: m.userId,
     role: m.role || "member",
     joinedAt: m.joinedAt || null,
+    displayName: m.displayName || m.userId, 
   }));
 
   return makeResponse(200, {
@@ -1143,6 +1145,7 @@ async function handleCreateCircle(payload, context) {
     isOwner: true,
     isAdmin: true,
     isMember: true,
+    displayName: jwtAuthor || userId, 
   };
 
   console.log("Creating creator membership:", membershipItem);
@@ -1224,6 +1227,40 @@ exports.handler = async (event) => {
         userCircleSet,
       });
     }
+
+    // --------------------------------------------------
+    // GET /api/circles/tags
+    // Returns all active tag configs for use in UI
+    // --------------------------------------------------
+    if (method === "GET" && path.endsWith("/api/circles/tags")) {
+      if (!userId) {
+        return makeResponse(401, {
+          message: "Unauthorized: no userId in token",
+        });
+      }
+
+      try {
+        const tags = await loadAllTagConfigs();
+
+        // Optionally, trim fields to what the UI needs
+        const simplified = tags.map((t) => ({
+          tagKey: t.tagKey,
+          displayLabel: t.displayLabel,
+          category: t.category,
+          description: t.description,
+        }));
+
+        return makeResponse(200, {
+          tags: simplified,
+        });
+      } catch (err) {
+        console.error("Error loading tag configs:", err);
+        return makeResponse(500, {
+          message: "Failed to load tag configs",
+        });
+      }
+    }
+
 
     // --------------------------------------------
     // Bedrock prompts route
