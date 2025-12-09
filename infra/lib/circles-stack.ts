@@ -15,6 +15,13 @@ import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 import * as wafv2 from 'aws-cdk-lib/aws-wafv2';
 import * as cognito from 'aws-cdk-lib/aws-cognito';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import * as sqs from 'aws-cdk-lib/aws-sqs';
+import * as lambdaEventSources from 'aws-cdk-lib/aws-lambda-event-sources';
+
+import * as dotenv from 'dotenv';
+dotenv.config({ path: '../.env.private' });
+const vapidPublicKey = process.env.CIRCLES_VAPID_PUBLIC_KEY || '';
+const vapidPrivateKey = process.env.CIRCLES_VAPID_PRIVATE_KEY || '';
 
 export interface CirclesStackProps extends StackProps {}
 
@@ -99,6 +106,82 @@ export class CirclesStack extends Stack {
       removalPolicy: RemovalPolicy.DESTROY,
     });
 
+    // --- DynamoDB Table (per-device notification subscriptions) ---
+    const circleNotificationSubscriptionsTable = new dynamodb.Table(
+      this,
+      'CircleNotificationSubscriptionsTable',
+      {
+        tableName: 'CircleNotificationSubscriptions',
+        partitionKey: {
+          name: 'userId',
+          type: dynamodb.AttributeType.STRING,
+        },
+        sortKey: {
+          name: 'subscriptionId',
+          type: dynamodb.AttributeType.STRING,
+        },
+        billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+        removalPolicy: RemovalPolicy.DESTROY, // fine for dev; can tighten later
+      }
+    );
+
+    // --- User notification preferences (per-user boolean flags) ---
+    const circleNotificationPreferencesTable = new dynamodb.Table(
+      this,
+      'CircleNotificationPreferencesTable',
+      {
+        tableName: 'CircleNotificationPreferences',
+        partitionKey: {
+          name: 'userId',
+          type: dynamodb.AttributeType.STRING,
+        },
+        billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+        removalPolicy: RemovalPolicy.DESTROY, // OK for dev
+      }
+    );
+
+    // --- SQS Queues for push notification events ---
+    const pushEventsDlq = new sqs.Queue(this, 'PushEventsDlq', {
+      queueName: 'CirclesPushEventsDlq',
+      retentionPeriod: Duration.days(14),
+    });
+
+    const pushEventsQueue = new sqs.Queue(this, 'PushEventsQueue', {
+      queueName: 'CirclesPushEventsQueue',
+      visibilityTimeout: Duration.seconds(60),
+      retentionPeriod: Duration.days(4),
+      deadLetterQueue: {
+        maxReceiveCount: 5,
+        queue: pushEventsDlq,
+      },
+    });
+
+    const vapidPublicKey = process.env.CIRCLES_VAPID_PUBLIC_KEY ?? '';
+    const vapidPrivateKey = process.env.CIRCLES_VAPID_PRIVATE_KEY ?? '';
+
+    // --- Lambda Function (push sender worker) ---
+    const pushSenderLambda = new lambda.Function(this, 'PushSenderLambda', {
+      functionName: 'CirclesPushSender',
+      runtime: lambda.Runtime.NODEJS_20_X,
+      handler: 'push-sender.handler',           // we'll create lambdas/push-sender.ts later
+      code: lambda.Code.fromAsset('../lambdas'),
+      timeout: Duration.seconds(30),
+      memorySize: 256,
+      environment: {
+        CIRCLE_NOTIFICATION_SUBSCRIPTIONS_TABLE_NAME: circleNotificationSubscriptionsTable.tableName,
+        CIRCLE_NOTIFICATION_PREFERENCES_TABLE_NAME: circleNotificationPreferencesTable.tableName,
+        PUSH_VAPID_PUBLIC_KEY: vapidPublicKey,
+        PUSH_VAPID_PRIVATE_KEY: vapidPrivateKey,
+        PUSH_VAPID_SUBJECT: 'mailto:you@example.com',
+      },
+    });
+
+    pushSenderLambda.addEventSource(
+      new lambdaEventSources.SqsEventSource(pushEventsQueue, {
+        batchSize: 10, // fine for V1
+      })
+    );
+
     // --- Lambda Function (API backend) ---
     const apiLambda = new lambda.Function(this, 'CirclesApiLambda', {
       runtime: lambda.Runtime.NODEJS_20_X,
@@ -110,10 +193,13 @@ export class CirclesStack extends Stack {
         CIRCLE_MEMBERSHIPS_TABLE_NAME: circleMembershipsTable.tableName, // memberships
         INVITATIONS_TABLE_NAME: circlesInvitationsTable.tableName,
         CIRCLE_TAG_CONFIG_TABLE_NAME: circlesTagConfigTable.tableName,
+        CIRCLE_NOTIFICATION_SUBSCRIPTIONS_TABLE_NAME: circleNotificationSubscriptionsTable.tableName,
+        CIRCLE_NOTIFICATION_PREFERENCES_TABLE_NAME: circleNotificationPreferencesTable.tableName,
         BEDROCK_MODEL_ID: 'anthropic.claude-3-haiku-20240307-v1:0',
         SES_FROM_EMAIL: 'no-reply-circles-invitation@behrens-hub.com',
         SES_REGION: 'us-east-1',
         BEDROCK_REGION: 'us-east-1',
+        PUSH_EVENTS_QUEUE_URL: pushEventsQueue.queueUrl,
       },
       timeout: Duration.seconds(10),
     });
@@ -124,6 +210,12 @@ export class CirclesStack extends Stack {
     circleMembershipsTable.grantReadWriteData(apiLambda);
     circlesInvitationsTable.grantReadWriteData(apiLambda);
     circlesTagConfigTable.grantReadData(apiLambda);
+    circleNotificationSubscriptionsTable.grantReadWriteData(apiLambda);
+    circleNotificationSubscriptionsTable.grantReadData(pushSenderLambda);
+    circleNotificationPreferencesTable.grantReadData(pushSenderLambda);
+
+    // Allow API Lambda to enqueue push events
+    pushEventsQueue.grantSendMessages(apiLambda);
 
     apiLambda.addToRolePolicy(
       new iam.PolicyStatement({
@@ -263,6 +355,23 @@ export class CirclesStack extends Stack {
     // Bedrock-backed prompt suggestions for the currently selected circle
     const promptsResource = apiBaseResource.addResource('prompts');
     promptsResource.addMethod('POST', lambdaIntegration, methodOptions);
+
+    // --- /api/notifications ---
+    // Subscription management for push notifications
+    const notificationsResource = apiBaseResource.addResource('notifications');
+
+    const notificationsSubscribeResource = notificationsResource.addResource('subscribe');
+    notificationsSubscribeResource.addMethod('POST', lambdaIntegration, methodOptions);
+
+    const notificationsUnsubscribeResource = notificationsResource.addResource('unsubscribe');
+    notificationsUnsubscribeResource.addMethod('POST', lambdaIntegration, methodOptions);
+
+    // Optional: CORS for notifications (probably not strictly needed for same-origin SPA)
+    notificationsResource.addCorsPreflight({
+      allowOrigins: ['https://circles.behrens-hub.com'],
+      allowMethods: ['POST', 'OPTIONS'],
+      allowHeaders: ['Content-Type', 'Authorization'],
+    });
 
     circlesResource.addCorsPreflight({
       allowOrigins: ['https://circles.behrens-hub.com'], // or '*' while experimenting

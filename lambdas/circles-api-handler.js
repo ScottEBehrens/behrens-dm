@@ -9,6 +9,7 @@ const {
   GetCommand,
   UpdateCommand,
   ScanCommand,
+  DeleteCommand, // unsubscribe
 } = require("@aws-sdk/lib-dynamodb");
 
 const {
@@ -18,6 +19,7 @@ const {
 
 // SES v3 client for sending invitation emails
 const { SESClient, SendEmailCommand } = require("@aws-sdk/client-ses");
+const { SQSClient, SendMessageCommand } = require("@aws-sdk/client-sqs");
 
 const { randomUUID } = require("crypto");
 
@@ -53,9 +55,18 @@ const SES_FROM_ADDRESS =
   process.env.SES_FROM_EMAIL ||
   null;
 
+// NEW: push events queue URL
+const PUSH_EVENTS_QUEUE_URL = process.env.PUSH_EVENTS_QUEUE_URL || null;
+
+const CIRCLE_NOTIFICATION_SUBSCRIPTIONS_TABLE_NAME =
+  process.env.CIRCLE_NOTIFICATION_SUBSCRIPTIONS_TABLE_NAME || null;
+
 // Set up DocumentClient-style wrapper
 const ddbClient = new DynamoDBClient({});
 const ddb = DynamoDBDocumentClient.from(ddbClient);
+
+// SQS client for push events
+const sqsClient = new SQSClient({});
 
 // Bedrock client (on-demand prompts)
 const bedrockClient = new BedrockRuntimeClient({
@@ -259,6 +270,58 @@ async function getCircleAndTagContext(circleId) {
 
   return { circle, tagKeys, tagDetails };
 }
+
+/**
+ * Enqueue a "new question" push event for downstream processing.
+ *
+ * @param {Object} params
+ * @param {string} params.circleId   // familyId in current API
+ * @param {string} params.circleName // for now, same as circleId
+ * @param {string} params.questionId
+ * @param {string} params.questionText
+ * @param {string} params.actorUserId
+ */
+async function enqueueNewQuestionPushEvent(params) {
+  if (!PUSH_EVENTS_QUEUE_URL) {
+    console.warn(
+      "PUSH_EVENTS_QUEUE_URL is not configured; skipping push event enqueue"
+    );
+    return;
+  }
+
+  const preview = (params.questionText || "").slice(0, 140);
+
+  const messageBody = JSON.stringify({
+    type: "NEW_QUESTION",
+    circleId: params.circleId,
+    circleName: params.circleName,
+    questionId: params.questionId,
+    questionPreview: preview,
+    actorUserId: params.actorUserId,
+  });
+
+  const cmd = new SendMessageCommand({
+    QueueUrl: PUSH_EVENTS_QUEUE_URL,
+    MessageBody: messageBody,
+  });
+
+  try {
+    const result = await sqsClient.send(cmd);
+    console.log("Enqueued NEW_QUESTION push event", {
+      messageId: result.MessageId,
+      circleId: params.circleId,
+      questionId: params.questionId,
+    });
+  } catch (err) {
+    console.error("Failed to enqueue NEW_QUESTION push event", {
+      error: err,
+      circleId: params.circleId,
+      questionId: params.questionId,
+    });
+    // V1: do not fail the API if enqueue fails
+  }
+}
+
 
 // -------------------------
 // Email helper: send invitation email via SES
@@ -1169,6 +1232,101 @@ async function handleCreateCircle(payload, context) {
   });
 }
 
+/**
+ * Save or update a device subscription for this user.
+ *
+ * @param {Object} params
+ * @param {string} params.userId
+ * @param {Object} params.subscription       // WebPush subscription
+ * @param {string} [params.userAgent]
+ * @param {string} [params.subscriptionId]   // optional; generated if absent
+ * @returns {Promise<string>} subscriptionId
+ */
+async function saveNotificationSubscription(params) {
+  if (!CIRCLE_NOTIFICATION_SUBSCRIPTIONS_TABLE_NAME) {
+    console.warn(
+      "CIRCLE_NOTIFICATION_SUBSCRIPTIONS_TABLE_NAME is not configured; skipping saveNotificationSubscription"
+    );
+    return null;
+  }
+
+  const { userId, subscription, userAgent, subscriptionId: inputId } = params;
+
+  if (!userId || !subscription || !subscription.endpoint || !subscription.keys) {
+    console.warn("Invalid subscription payload in saveNotificationSubscription", {
+      hasUserId: !!userId,
+      hasSubscription: !!subscription,
+    });
+    return null;
+  }
+
+  const subscriptionId = inputId || randomUUID();
+  const now = new Date().toISOString();
+
+  const item = {
+    userId,
+    subscriptionId,
+    endpoint: subscription.endpoint,
+    p256dh: subscription.keys.p256dh,
+    auth: subscription.keys.auth,
+    userAgent: userAgent || "",
+    createdAt: now,
+  };
+
+  await ddb.send(
+    new PutCommand({
+      TableName: CIRCLE_NOTIFICATION_SUBSCRIPTIONS_TABLE_NAME,
+      Item: item,
+    })
+  );
+
+  console.log("Saved notification subscription", {
+    userId,
+    subscriptionId,
+    endpoint: subscription.endpoint,
+  });
+
+  return subscriptionId;
+}
+
+/**
+ * Delete a device subscription for this user by subscriptionId.
+ *
+ * @param {Object} params
+ * @param {string} params.userId
+ * @param {string} params.subscriptionId
+ */
+async function deleteNotificationSubscription(params) {
+  if (!CIRCLE_NOTIFICATION_SUBSCRIPTIONS_TABLE_NAME) {
+    console.warn(
+      "CIRCLE_NOTIFICATION_SUBSCRIPTIONS_TABLE_NAME is not configured; skipping deleteNotificationSubscription"
+    );
+    return;
+  }
+
+  const { userId, subscriptionId } = params;
+
+  if (!userId || !subscriptionId) {
+    console.warn("Invalid params to deleteNotificationSubscription", {
+      hasUserId: !!userId,
+      hasSubscriptionId: !!subscriptionId,
+    });
+    return;
+  }
+
+  await ddb.send(
+    new DeleteCommand({
+      TableName: CIRCLE_NOTIFICATION_SUBSCRIPTIONS_TABLE_NAME,
+      Key: {
+        userId,
+        subscriptionId,
+      },
+    })
+  );
+
+  console.log("Deleted notification subscription", { userId, subscriptionId });
+}
+
 
 exports.handler = async (event) => {
   console.log("Incoming event:", JSON.stringify(event));
@@ -1552,6 +1710,22 @@ exports.handler = async (event) => {
         })
       );
 
+      // If this is a new question, enqueue a push event for downstream processing
+      if (messageType === "question") {
+        try {
+          await enqueueNewQuestionPushEvent({
+            circleId: familyId,
+            circleName: familyId, // V1: use familyId as name; can be upgraded later
+            questionId: messageId,
+            questionText: text,
+            actorUserId: userId,
+          });
+        } catch (e) {
+          // Helper already logs errors; this catch is purely defensive
+          console.error("Unexpected error calling enqueueNewQuestionPushEvent:", e);
+        }
+      }
+
       return makeResponse(201, {
         message: "Message created",
         item,
@@ -1560,6 +1734,108 @@ exports.handler = async (event) => {
           userId,
           claims: jwtClaims || undefined,
         },
+      });
+    }
+
+    // --------------------------------------------------
+    // POST /api/notifications/subscribe
+    // Save or update a device's push subscription for this user
+    // --------------------------------------------------
+    if (
+      method === "POST" &&
+      path.endsWith("/api/notifications/subscribe")
+    ) {
+      if (!userId) {
+        return makeResponse(401, { message: "Unauthorized" });
+      }
+
+      if (!event.body) {
+        return makeResponse(400, { message: "Missing request body" });
+      }
+
+      let payload;
+      try {
+        payload = JSON.parse(event.body);
+      } catch (e) {
+        return makeResponse(400, { message: "Invalid JSON body" });
+      }
+
+      const { subscription, userAgent, subscriptionId } = payload || {};
+
+      if (
+        !subscription ||
+        !subscription.endpoint ||
+        !subscription.keys ||
+        !subscription.keys.p256dh ||
+        !subscription.keys.auth
+      ) {
+        return makeResponse(400, {
+          message: "Invalid subscription payload",
+        });
+      }
+
+      let savedId = null;
+      try {
+        savedId = await saveNotificationSubscription({
+          userId,
+          subscription,
+          userAgent,
+          subscriptionId,
+        });
+      } catch (err) {
+        console.error("Error saving notification subscription:", err);
+        return makeResponse(500, { message: "Failed to save subscription" });
+      }
+
+      return makeResponse(200, {
+        success: true,
+        subscriptionId: savedId,
+      });
+    }
+
+    // --------------------------------------------------
+    // POST /api/notifications/unsubscribe
+    // Remove a device's push subscription for this user
+    // --------------------------------------------------
+    if (
+      method === "POST" &&
+      path.endsWith("/api/notifications/unsubscribe")
+    ) {
+      if (!userId) {
+        return makeResponse(401, { message: "Unauthorized" });
+      }
+
+      if (!event.body) {
+        return makeResponse(400, { message: "Missing request body" });
+      }
+
+      let payload;
+      try {
+        payload = JSON.parse(event.body);
+      } catch (e) {
+        return makeResponse(400, { message: "Invalid JSON body" });
+      }
+
+      const { subscriptionId } = payload || {};
+
+      if (!subscriptionId) {
+        return makeResponse(400, {
+          message: "subscriptionId is required",
+        });
+      }
+
+      try {
+        await deleteNotificationSubscription({
+          userId,
+          subscriptionId,
+        });
+      } catch (err) {
+        console.error("Error deleting notification subscription:", err);
+        return makeResponse(500, { message: "Failed to delete subscription" });
+      }
+
+      return makeResponse(200, {
+        success: true,
       });
     }
 

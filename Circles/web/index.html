@@ -5,6 +5,8 @@
   <title>Circles – Messages</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" type="image/svg+xml" href="/circle.svg">
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#020617">
   <style>
     body {
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -94,10 +96,10 @@
       margin: 1.25rem 0 1.0rem;
     }
 
-    /* Remove only the instructional label in the main message composer */
-    #messageForm > label {
+    /* Hide only the label tied to the textarea */
+    #messageForm > label[for="textInput"] {
       display: none;
-    }
+    } 
 
     .circle-label {
       display: none;
@@ -183,6 +185,24 @@
       opacity: 0.6;
       cursor: default;
     }
+
+    .notifications-toggle {
+      background: transparent;
+      border-radius: 999px;
+      border: 1px dashed #4b5563;
+      color: #9ca3af;
+      padding: 0.2rem 0.6rem;
+      font-size: 0.75rem;
+      cursor: pointer;
+      margin-left: 0.5rem;
+    }
+
+    .notifications-toggle.enabled {
+      border-style: solid;
+      border-color: #22c55e;
+      color: #bbf7d0;
+    }
+
 
     /* Compact styling for the circle dropdown selector */
     #circleSelect {
@@ -594,6 +614,9 @@
       <div class="user-auth">
         <div id="userInfo" class="user-auth-info">Not signed in</div>
         <button id="authButton" type="button">Sign in</button>
+        <button id="notificationsButton" type="button" class="notifications-toggle" style="display:none;">
+          Enable notifications
+        </button>
         <div id="statusPill" class="status-pill">idle</div>
       </div>
     </div>
@@ -767,6 +790,7 @@
     const authButton = document.getElementById('authButton');
     const circleSelect = document.getElementById('circleSelect');
     const newCircleButton = document.getElementById('newCircleButton'); 
+    const notificationsButton = document.getElementById('notificationsButton');
 
     const createCircleForm = document.getElementById('createCircleForm');
     const createCircleNameInput = document.getElementById('createCircleName');
@@ -804,6 +828,32 @@
 
     const mainView = document.getElementById('main-view');
     const createCircleView = document.getElementById('create-circle-view');
+
+    // VAPID public key for WebPush (V1: placeholder)
+    // Replace this with your real base64-url VAPID public key once generated.
+    const VAPID_PUBLIC_KEY = 'BJwaCNsq6VSgVlKsAtsAOZwgGjrIX8gF1fNy4eGsk8x0m3_JuIpzxPC1NxT_KN5EUr5Ce5sO3agj6gy2etUMdwg';
+
+    function browserSupportsPushNotifications() {
+      return (
+        'serviceWorker' in navigator &&
+        'PushManager' in window &&
+        'Notification' in window
+      );
+    }
+
+    function urlBase64ToUint8Array(base64String) {
+      const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+      const base64 = (base64String + padding)
+        .replace(/-/g, '+')
+        .replace(/_/g, '/');
+      const rawData = atob(base64);
+      const outputArray = new Uint8Array(rawData.length);
+      for (let i = 0; i < rawData.length; i++) {
+        outputArray[i] = rawData.charCodeAt(i);
+      }
+      return outputArray;
+    }
+
 
     function showMainView() {
       if (mainView) mainView.style.display = '';
@@ -901,6 +951,158 @@
         return localStorage.getItem(LS_PENDING_INVITE_KEY);
       } catch {
         return null;
+      }
+    }
+
+    async function getServiceWorkerRegistration() {
+      if (!('serviceWorker' in navigator)) {
+        console.warn('Service workers not supported in this browser');
+        return null;
+      }
+
+      try {
+        // If nothing is registered yet, register our SW
+        const existing = await navigator.serviceWorker.getRegistration();
+        if (!existing) {
+          await navigator.serviceWorker.register('/service-worker.js');
+        }
+
+        // Wait until a service worker is actively controlling this page
+        const readyRegistration = await navigator.serviceWorker.ready;
+        return readyRegistration;
+      } catch (err) {
+        console.error('Service worker registration/ready failed', err);
+        setStatus('Notifications unavailable (SW registration failed)', 'warn');
+        return null;
+      }
+    }
+
+
+    async function subscribeDeviceToPush(registration) {
+      if (!registration || !registration.pushManager) {
+        console.warn('PushManager not available on this registration');
+        setStatus('Notifications unavailable in this browser', 'warn');
+        return null;
+      }
+
+      const existing = await registration.pushManager.getSubscription();
+      if (existing) {
+        return existing;
+      }
+
+      if (!VAPID_PUBLIC_KEY || VAPID_PUBLIC_KEY.startsWith('TODO_')) {
+        console.warn('VAPID public key not configured yet');
+        setStatus('Notifications not configured yet (missing VAPID key)', 'warn');
+        return null;
+      }
+
+      const appServerKey = urlBase64ToUint8Array(VAPID_PUBLIC_KEY);
+
+      return registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: appServerKey,
+      });
+    }
+
+    async function enableNotificationsForThisDevice() {
+      if (!browserSupportsPushNotifications()) {
+        setStatus('This browser does not support push notifications', 'warn');
+        return;
+      }
+
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') {
+        setStatus('Notifications permission was not granted', 'warn');
+        return;
+      }
+
+      const idToken = getIdToken();
+      if (!idToken) {
+        setStatus('Sign in to enable notifications', 'warn');
+        return;
+      }
+
+      const registration = await getServiceWorkerRegistration();
+      if (!registration) return;
+
+      const subscription = await subscribeDeviceToPush(registration);
+      if (!subscription) return;
+
+      try {
+        const res = await fetch('/api/notifications/subscribe', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + idToken,
+          },
+          body: JSON.stringify({
+            subscription,
+            userAgent: navigator.userAgent,
+          }),
+        });
+
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok) {
+          console.error('Subscription save failed', data);
+          setStatus('Failed to save notification subscription', 'err');
+          return;
+        }
+
+        setStatus('Notifications enabled on this device', '');
+        // Re-check and sync the button with actual subscription state
+        refreshNotificationsButtonState().catch(console.error);
+
+      } catch (err) {
+        console.error('Error enabling notifications', err);
+        setStatus('Failed to enable notifications', 'err');
+      }
+    }
+
+    async function refreshNotificationsButtonState() {
+      if (!notificationsButton) return;
+
+      // If the browser doesn't support push, just hide the button
+      if (!browserSupportsPushNotifications()) {
+        notificationsButton.style.display = 'none';
+        return;
+      }
+
+      const idToken = getIdToken();
+      if (!idToken) {
+        // Not signed in → show "Enable notifications" but not enabled
+        notificationsButton.style.display = '';
+        notificationsButton.textContent = 'Enable notifications';
+        notificationsButton.classList.remove('enabled');
+        return;
+      }
+
+      // We are signed in; make sure the SW is ready and check subscription
+      const registration = await getServiceWorkerRegistration();
+      if (!registration || !registration.pushManager) {
+        notificationsButton.style.display = '';
+        notificationsButton.textContent = 'Enable notifications';
+        notificationsButton.classList.remove('enabled');
+        return;
+      }
+
+      try {
+        const subscription = await registration.pushManager.getSubscription();
+        notificationsButton.style.display = '';
+
+        if (subscription) {
+          // Already subscribed on this device
+          notificationsButton.textContent = 'Notifications enabled';
+          notificationsButton.classList.add('enabled');
+        } else {
+          notificationsButton.textContent = 'Enable notifications';
+          notificationsButton.classList.remove('enabled');
+        }
+      } catch (err) {
+        console.error('Error checking existing push subscription', err);
+        notificationsButton.style.display = '';
+        notificationsButton.textContent = 'Enable notifications';
+        notificationsButton.classList.remove('enabled');
       }
     }
 
@@ -1261,19 +1463,34 @@
         userInfoEl.textContent = `${name}`;
         authButton.textContent = 'Sign out';
         authButton.onclick = logout;
-            // SHOW main UI, HIDE splash
+        // SHOW main UI, HIDE splash
         if (signedInMain) signedInMain.style.display = '';
         if (signedOutSplash) signedOutSplash.style.display = 'none';
         if (typeof showMainView === 'function') {
           showMainView();
         }
+
+        if (notificationsButton) {
+          if (browserSupportsPushNotifications()) {
+            notificationsButton.style.display = '';
+            // Async: figure out if we're already subscribed
+            refreshNotificationsButtonState().catch(console.error);
+          } else {
+            notificationsButton.style.display = 'none';
+          }
+        }
+
       } else {
         userInfoEl.textContent = 'Not signed in';
         authButton.textContent = 'Sign in';
         authButton.onclick = login;
-            // HIDE main UI, SHOW splash
+        // HIDE main UI, SHOW splash
         if (signedInMain) signedInMain.style.display = 'none';
         if (signedOutSplash) signedOutSplash.style.display = 'block';
+
+        if (notificationsButton) {
+          notificationsButton.style.display = 'none';
+        }
       }
 
       updateInviteSectionVisibility();
@@ -1804,11 +2021,13 @@
           setDebug('POST failed: ' + (data.message || 'unknown error'));
         } else {
           const saved = data || {};
+          const savedItem = saved.item || saved;
 
           // If we just created a question, remember its id as the current question
-          if (messageTypeToSend === 'question' && saved.messageId) {
-            currentQuestionId = saved.messageId;
+          if (messageTypeToSend === 'question' && savedItem.messageId) {
+            currentQuestionId = savedItem.messageId;
           }
+
 
           // Reset for next message
           nextMessageType = 'answer';
@@ -2114,6 +2333,14 @@
       });
     }
 
+    if (notificationsButton) {
+      notificationsButton.addEventListener('click', async (e) => {
+        e.preventDefault();
+        await enableNotificationsForThisDevice();
+      });
+    }
+
+
     // initial load
     window.addEventListener('load', () => {
       // 1) Capture ?invite=... from URL (if present)
@@ -2148,6 +2375,9 @@
           loadMessages().catch(console.error);
           // If there's a pending invite and we're signed in, accept it
           maybeAcceptPendingInvite().catch(console.error);
+          if (notificationsButton && browserSupportsPushNotifications()) {
+            refreshNotificationsButtonState().catch(console.error);
+          }
         });
     });
   </script>
