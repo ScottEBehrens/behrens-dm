@@ -170,6 +170,7 @@ export class CirclesStack extends Stack {
       environment: {
         CIRCLE_NOTIFICATION_SUBSCRIPTIONS_TABLE_NAME: circleNotificationSubscriptionsTable.tableName,
         CIRCLE_NOTIFICATION_PREFERENCES_TABLE_NAME: circleNotificationPreferencesTable.tableName,
+        CIRCLE_MEMBERSHIPS_TABLE_NAME: circleMembershipsTable.tableName,
         PUSH_VAPID_PUBLIC_KEY: vapidPublicKey,
         PUSH_VAPID_PRIVATE_KEY: vapidPrivateKey,
         PUSH_VAPID_SUBJECT: 'mailto:you@example.com',
@@ -213,6 +214,7 @@ export class CirclesStack extends Stack {
     circleNotificationSubscriptionsTable.grantReadWriteData(apiLambda);
     circleNotificationSubscriptionsTable.grantReadData(pushSenderLambda);
     circleNotificationPreferencesTable.grantReadData(pushSenderLambda);
+    circleMembershipsTable.grantReadData(pushSenderLambda);
 
     // Allow API Lambda to enqueue push events
     pushEventsQueue.grantSendMessages(apiLambda);

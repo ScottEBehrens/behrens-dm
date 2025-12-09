@@ -1,590 +1,429 @@
-# Circles – A Lightweight Family Messaging & Conversation App
+Circles — Serverless Family Messaging Platform
 
-Circles is a lightweight, serverless web application designed to help families stay connected through structured conversation prompts and threaded question–answer discussions.
+A lightweight, AWS-native, privacy-focused messaging system designed for families and small groups.
 
-The app supports:
+This repository contains the complete backend and frontend implementation of Circles, including infrastructure as code (AWS CDK), Lambda functions, API Gateway routing, DynamoDB schemas, a PWA frontend, and the full push-notification system (web push with VAPID + SQS fan-out).
 
-- Circle-based messaging
-- Threaded questions and answers
-- AI-generated prompts (AWS Bedrock)
-- Secure authentication (AWS Cognito)
-- Invite-only access (AWS SES + invitation flows)
-- A simple UI served from S3/CloudFront with no build step
+This README provides the engineering-facing documentation for the system.
 
----
+1. Related Documents
 
-## Features
+Circles maintains several external documents for product vision, roadmap, architectural detail, and regression testing:
 
-### Circle-Based Messaging
+Product Vision
+https://scott.behrens-hub.com/circles/circles-product-vision.html
 
-Each family or group is represented as a *circle*, with its own message timeline. Users can switch between circles and see only the messages that belong to that circle.
+Technical Deep Dive & Architecture Details
+https://scott.behrens-hub.com/circles-technical-deep-dive.html
 
-### Threaded Questions & Answers
+Architecture Diagram (PNG)
+https://scott.behrens-hub.com/circles/circles_arch_diagram.png
 
-Messages now support question threads:
+Product Roadmap
+https://scott.behrens-hub.com/circles/circles-roadmap.html
 
-- **Questions** are first-class messages, tagged with:
-  - `messageType = "question"`
-  - A unique `messageId` (e.g., `"Q3"` or `"msg_<uuid>"`)
-- **Answers** link back to a question using:
-  - `questionId = <question.messageId>`
+Regression Test Plan
+https://scott.behrens-hub.com/circles/circles_regression_test_plan.html
 
-The UI groups messages into threads and displays:
+2. Architecture Overview
 
-- The **latest question** and its answers by default
-- Older questions on demand via a “Show previous question” control
+Circles is implemented as a fully serverless application:
 
-Older data may use human-readable message IDs like `"Q1"` / `"Q2"`, while newer messages typically use generated IDs such as `msg_<uuid>`. The system only cares that `questionId` matches the corresponding `messageId`.
+                        +-----------------------------+
+                        |         CloudFront          |
+                        |  (HTTPS CDN + SPA hosting)  |
+                        +-------------+---------------+
+                                      |
+                                      v
+                        +-----------------------------+
+                        |     S3 Single Page App      |
+                        |   index.html + JS + CSS     |
+                        +-------------+---------------+
+                                      |
+                                      v
++----------------------+     +-------------------------+      +----------------------------+
+|   Cognito Hosted UI  |<--->|      API Gateway        |----->|   Lambda: circles-api      |
+| OAuth2 / JWT tokens  |     |   /api/... endpoints    |      | Message logic + auth       |
++----------------------+     +-------------------------+      +----------------------------+
+                                                                      |        |
+                                                                      |        |
+                                                                      v        v
+                                                           +----------------------------+
+                                                           |       DynamoDB Tables      |
+                                                           |  - Circles                 |
+                                                           |  - Messages                |
+                                                           |  - CircleMembers           |
+                                                           |  - InviteTokens            |
+                                                           |  - NotificationSubs        |
+                                                           +----------------------------+
 
-### AI-Powered Prompt Suggestions
+                                      (event fan-out)
+                                              |
+                                              v
+                                    +----------------------+
+                                    |      SQS Queue       |
+                                    | PushEventQueue       |
+                                    +----------+-----------+
+                                               |
+                                               v
+                                    +----------------------+
+                                    |  Lambda: PushSender  |
+                                    |  web-push w/ VAPID   |
+                                    +----------------------+
+                                               |
+                                               v
+                                   Browser → Service Worker → System Notification
 
-Circles integrates with **AWS Bedrock** (Claude 3 Haiku) to generate short, engaging conversation prompts for each circle. Prompts are:
 
-- Tailored based on optional circle tags (e.g., life stage, relationship, support)
-- Lightweight and family-friendly
-- Returned as a JSON array for simple consumption by the frontend
-
-### Authentication & Authorization
+The frontend is a Progressive Web App, allowing:
 
-- Users authenticate using **Amazon Cognito Hosted UI**
-- API Gateway validates JWT tokens
-- The backend enforces **membership-based access**:
-  - Users can only view or post messages in circles they belong to
-  - Certain actions (e.g., creating invitations) are restricted to members
+Installable “app-like” experience
 
-### Invitations
+Background service worker
 
-Circle owners (or authorized members) can invite others:
+Push notifications
 
-- An invitation record is stored in DynamoDB
-- An email invitation is sent via **AWS SES**
-- Accepting an invitation:
-  - Validates the token and expiration
-  - Creates or updates a membership record in `CircleMemberships`
+Local caching and offline support
 
-### UI/UX
+3. Infrastructure Components (CDK)
+CloudFront + S3 SPA
 
-- Dark blue theme (Option A) with a clean, minimal layout
-- Messages styled with subtle borders, with questions visually highlighted
-- The latest question appears at the top; users can reveal older question threads
-- Invite section and analytics are accessible but not visually dominant
+Serves the single-page application.
 
----
+Handles deep links (/?circleId=...).
 
-## Architecture Overview
+API Gateway
 
-Circles is implemented as a fully serverless application using AWS.
+Routes authenticated requests to backend Lambdas:
 
-High-level architecture:
+/api/circles
 
-- **Frontend**
-  - Static site hosted on **S3**
-  - Delivered via **CloudFront**
-  - A single `index.html` with inline CSS and JavaScript (no frontend framework)
-- **Backend**
-  - **API Gateway (REST)** fronting a single Lambda handler:
-    - `lambdas/circles-api-handler.js`
-  - **Lambda** (Node.js 20) using AWS SDK v3
-  - **DynamoDB** for messages, circles, memberships, invitations, and tag configuration
-  - **Bedrock** for AI prompt generation
-  - **SES** for email invitations
-  - **Cognito** for authentication
+/api/circles/tags
 
-Conceptual flow:
+/api/circles/config
 
-```text
-Browser
-  ↓ (HTTPS)
-CloudFront (CDN)
-  ↓
-S3 (Static Frontend: index.html, JS, CSS)
+/api/circles/members
 
-Browser
-  ↓ (JWT in Authorization header)
-API Gateway (REST)
-  ↓
-Lambda (circles-api-handler.js)
-  ↳ DynamoDB (CirclesMessages, Circles, CircleMemberships, CircleInvitations, circles-tag-config)
-  ↳ Bedrock (prompt generation)
-  ↳ SES (email invitations)
-  ↳ Cognito (authentication, identity via JWT claims)
-Data Model
-Messages Table: CirclesMessages
-Table name: CirclesMessages
+/api/circles/invitations
 
-Partition key: familyId
+/api/prompts
 
-Sort key: createdAt
+/api/notifications/subscribe
 
-Each message is stored with fields similar to:
+/api/notifications/unsubscribe
 
-json
-Copy code
-{
-  "familyId": "behrens",
-  "createdAt": "2025-12-07T04:14:00.895Z",
-  "author": "ScottEBehrens@yahoo.com",
-  "text": "What's one thing you've learned from a younger or older family member that's stuck with you?",
-  "messageId": "Q3",
-  "messageType": "question"
-}
-For answers:
+Lambda Functions
 
-json
-Copy code
-{
-  "familyId": "behrens",
-  "createdAt": "2025-12-07T04:22:10.123Z",
-  "author": "someone@example.com",
-  "text": "Grandpa taught me how to listen first before speaking.",
-  "messageId": "msg_b13f8c1e-3ef2-4f97-9e87-abc123def456",
-  "messageType": "answer",
-  "questionId": "Q3"
-}
-Message Model Rules
-Questions
+circles-api-handler.js
+Core API routing, business logic, message creation, membership validation.
 
-messageType = "question"
+push-sender.js
+Consumes SQS push events and sends WebPush payloads.
 
-messageId must be present and unique (e.g., "Q1", "Q2", "Q3", or "msg_<uuid>")
+DynamoDB Tables
+Table	Purpose	Key Schema
+Circles	Circle definitions	PK: circleId
+CircleMembers	Users <→ Circles mapping	PK: circleId, SK: userId
+Messages	Questions + answers	PK: familyId, SK: timestamp
+InviteTokens	Invitation system	PK: invitationId
+CircleNotificationSubscriptions	Push subscriptions	PK: userId, SK: subscriptionId
+SQS Queue
 
-questionId is typically not set on question rows
+PushEventQueue
+Decouples message creation from notification delivery.
 
-Answers
+Cognito Hosted UI
 
-messageType = "answer"
+OAuth2 implicit flow
 
-questionId points to the messageId of the corresponding question
+ID and access tokens stored in localStorage
 
-messageId is also generated and stored for the answer itself
+Tokens validated server-side in Lambda
 
-Legacy Data
+4. Deployment Model
 
-Some older records may have:
+Deployment is fully performed through AWS CDK.
 
-No messageType (implicitly treated as answers)
-
-No messageId
-
-Human-readable messageId values like "Q1" / "Q2"
-
-The frontend logic is robust to these differences but the long-term direction is for all messages to have a consistent messageId format.
-
-Circles Table: Circles
-Stores basic metadata about each circle:
-
-circleId (primary key)
-
-name
-
-description
-
-Optional:
-
-tags (array of tag keys used for AI prompt context)
-
-Circle Memberships Table: CircleMemberships
-Represents which users belong to which circles:
-
-userId (partition key)
-
-circleId
-
-role (e.g., "owner", "member")
-
-joinedAt
-
-Memberships are used to enforce access to circle messages and to power /api/circles/config and /api/circles/members.
-
-Circle Invitations Table: CircleInvitations
-Handles invitation lifecycle:
-
-invitationId (primary key)
-
-circleId
-
-invitedEmail
-
-role
-
-createdByUserId
-
-createdAt
-
-expiresAt (epoch seconds, TTL-style)
-
-status (e.g., "PENDING", "ACCEPTED")
-
-maxUses
-
-usesCount
-
-Tag Config Table: circles-tag-config
-Stores configuration for circle tags used to tailor AI prompt generation:
-
-tagKey
-
-displayLabel
-
-category (e.g., "life_stage", "relationship", "support")
-
-description
-
-toneGuidance
-
-active (boolean)
-
-Backend API
-All routes are handled by lambdas/circles-api-handler.js behind API Gateway.
-
-Authentication Context
-The handler extracts user identity from the JWT claims supplied by API Gateway’s authorizer:
-
-userId from sub / cognito:username / email
-
-author (display name) from name / email / cognito:username
-
-A set of circles the user belongs to via CircleMemberships
-
-Most routes require:
-
-A valid JWT
-
-That the user is a member of the relevant circle
-
-GET /api/circles?familyId=<circleId>
-List messages for a circle.
-
-Query parameters:
-
-familyId – The circle ID (e.g., "behrens").
-
-limit – Optional, defaults to 20. Retrieved in newest-first order.
-
-Behavior:
-
-Requires user to be a member of familyId
-
-Queries CirclesMessages by familyId, sorted by createdAt (descending)
-
-Returns an array of message items
-
-Sample response:
-
-json
-Copy code
-{
-  "message": "OK",
-  "familyId": "behrens",
-  "count": 14,
-  "items": [
-    {
-      "familyId": "behrens",
-      "createdAt": "2025-12-07T04:22:10.123Z",
-      "author": "someone@example.com",
-      "text": "Grandpa taught me how to listen first before speaking.",
-      "messageId": "msg_b13f8c1e-3ef2-4f97-9e87-abc123def456",
-      "messageType": "answer",
-      "questionId": "Q3"
-    }
-  ],
-  "user": {
-    "author": "Some User",
-    "userId": "abc-123"
-  }
-}
-POST /api/circles
-Create a new message (question or answer).
-
-Request body:
-
-json
-Copy code
-{
-  "familyId": "behrens",
-  "text": "What's your favorite childhood memory?",
-  "messageType": "question",
-  "questionId": null
-}
-Backend behavior:
-
-Validates that the user:
-
-Has a valid token
-
-Is a member of the target circle (familyId)
-
-Normalizes/derives:
-
-messageType (defaults to "answer" if not "question")
-
-messageId (generates msg_<uuid> if none provided)
-
-questionId (stored only for non-question messages, if provided)
-
-Writes the item into CirclesMessages
-
-Returns the saved item (including generated messageId)
-
-Sample response:
-
-json
-Copy code
-{
-  "message": "Message created",
-  "item": {
-    "familyId": "behrens",
-    "createdAt": "2025-12-07T04:14:00.895Z",
-    "author": "ScottEBehrens@yahoo.com",
-    "text": "What's one thing you've learned from a younger or older family member that's stuck with you?",
-    "messageId": "msg_f0123abc-4567-890d-ef01-23456789abcd",
-    "messageType": "question"
-  },
-  "user": {
-    "author": "Scott Behrens",
-    "userId": "user-123"
-  }
-}
-POST /api/prompts
-Generates conversation prompts via AWS Bedrock.
-
-Request body:
-
-json
-Copy code
-{
-  "familyId": "behrens",
-  "count": 4
-}
-Behavior:
-
-Validates user and circle membership (for the given familyId / circleId)
-
-Loads circle tags from circles-tag-config (if configured)
-
-Builds a tag-aware instruction prompt for the model
-
-Calls Bedrock using InvokeModelCommand
-
-Attempts to parse the model’s response as a JSON array of strings
-
-Falls back to line-splitting if the model ignores the JSON instruction
-
-Sample response:
-
-json
-Copy code
-{
-  "message": "Prompts generated",
-  "prompts": [
-    "What is a small moment this week that made you smile?",
-    "What is a favorite memory you share with someone in this circle?",
-    "Is there something you're looking forward to in the next month?",
-    "What is a piece of advice someone in the family gave you that stuck?"
-  ],
-  "modelId": "anthropic.claude-3-haiku-20240307-v1:0",
-  "region": "us-east-1",
-  "circleId": "behrens",
-  "tagsUsed": [],
-  "user": {
-    "userId": "user-123",
-    "author": "Scott Behrens"
-  }
-}
-GET /api/circles/config
-Returns the list of circles the current user belongs to.
-
-Behavior:
-
-Queries CircleMemberships for userId
-
-For each circleId, loads metadata from the Circles table
-
-Returns circles with name, description, and role
-
-GET /api/circles/members?familyId=<circleId>
-Lists members of a circle.
-
-Behavior:
-
-Requires user to be a member of the circle
-
-Scans CircleMemberships for the given circleId
-
-Returns an array of { userId, role, joinedAt }
-
-POST /api/circles/{circleId}/invitations
-Creates an invitation and (if configured) sends an email via SES.
-
-Behavior:
-
-Requires the caller to be a member of the circle
-
-Writes an invitation record to CircleInvitations
-
-Generates an invite link using FRONTEND_BASE_URL
-
-Attempts to send an email (if SES_FROM_ADDRESS is configured)
-
-POST /api/circles/invitations/accept
-Accepts an invitation and adds the user to the circle.
-
-Behavior:
-
-Validates the invitation:
-
-Exists
-
-Not expired
-
-Status is PENDING
-
-Under maxUses (if set)
-
-Creates/updates the membership record
-
-Updates the invitation status to ACCEPTED and increments usesCount
-
-Frontend Overview
-The frontend is a single static-page app: index.html, containing:
-
-HTML structure for:
-
-Header with logo and circle selector
-
-Message composer
-
-Messages list
-
-Suggest prompts section
-
-Invite section
-
-Lightweight footer
-
-CSS for:
-
-Dark blue theme
-
-Question highlighting (borders, labels)
-
-Message hover styling
-
-JavaScript for:
-
-Cognito authentication integration
-
-Token handling and localStorage persistence
-
-Circle switching
-
-Loading and rendering messages
-
-Posting messages and questions
-
-Handling prompt suggestions
-
-Handling invite flows
-
-Multi-Question Rendering
-The rendering logic:
-
-Loads all messages for the selected circle via GET /api/circles.
-
-Identifies all questions where messageType === "question".
-
-Sorts questions newest → oldest by createdAt.
-
-Displays:
-
-The latest question labeled “Current Question”, plus its answers.
-
-Any previously revealed questions labeled “Previous Question”, each with their respective answers.
-
-Adds a “Show previous question” button when there are older questions available:
-
-Clicking reveals one more question thread at a time.
-
-Answers for a given question are identified by matching questionId to that question’s messageId and are typically sorted so the newest answers appear first.
-
-Local Development
-High-level steps:
-
-Make frontend changes in index.html (HTML, CSS, JS).
-
-Update backend code in lambdas/circles-api-handler.js if needed.
-
-Deploy using AWS CDK, e.g.:
-
-bash
-Copy code
+Deployment Steps
+cd infra/
+npm install
+npm run build
 cdk deploy CirclesStack
-Open the CloudFront URL.
 
-Authenticate via Cognito Hosted UI.
+Required Environment Variables (values redacted)
+PUSH_VAPID_PUBLIC_KEY=REDACTED
+PUSH_VAPID_PRIVATE_KEY=REDACTED
+PUSH_VAPID_SUBJECT=mailto:you@example.com
 
-Interact with circles, questions, answers, prompts, and invitations.
 
-Roadmap
-Recently Completed
-Introduced a threaded Q&A message model:
+These are loaded by CDK from process.env and passed into the PushSender Lambda.
 
-messageType, messageId, and questionId
+5. Data Model
+Messages Table Structure
+{
+  familyId: "devteam",
+  messageId: "msg_xxx",
+  messageType: "question" | "answer",
+  text: "...",
+  author: "userId",
+  createdAt: "ISO8601",
+  questionId: "msg_abc123"   // for answers only
+}
 
-Updated the backend to:
 
-Generate messageId for new messages
+Rules:
 
-Respect messageType and questionId from the client
+messageType === "question" → no questionId
 
-Updated the frontend to:
+messageType === "answer" → must include questionId
 
-Highlight the current question and its answers
+UI automatically tracks the most recent question per circle
 
-Allow revealing previous question threads
+Notification Subscriptions
+{
+  userId: "cognito-sub",
+  subscriptionId: "uuid",
+  endpoint: "https://fcm.googleapis.com/fcm/send/....",
+  p256dh: "...",
+  auth: "...",
+  createdAt: "...",
+  userAgent: "Chrome/123.0..."
+}
 
-Performed a targeted data cleanup in DynamoDB to align older messages with the new schema.
 
-Upcoming Iterations
-1. Create a Circle (Backend + Frontend)
-Add an API route to create new circles (e.g., POST /api/circles/create).
+Users may have multiple subscriptions (desktop, phone, tablet).
 
-Insert:
+6. API Specification
+POST /api/circles
 
-A Circles row for the new circle.
+Create a question or answer.
 
-A CircleMemberships row for the creator as owner.
+Request:
 
-Add a UI flow to:
+{
+  "familyId": "devteam",
+  "text": "What’s your favorite…",
+  "messageType": "question" | "answer",
+  "questionId": "msg_123"        // answers only
+}
 
-Name a circle
 
-Optionally describe it and choose tags
+Response:
 
-Automatically switch to the new circle after creation.
+{
+  "item": { ...message object... }
+}
 
-2. Refactor and Standardize the Codebase
-Normalize naming:
 
-Align usage of familyId vs. circleId.
+A NEW_QUESTION or NEW_ANSWER event is emitted into SQS.
 
-Standardize messageId format going forward.
+POST /api/notifications/subscribe
 
-Clean up legacy assumptions and inline JS.
+Registers a device for push notifications.
 
-Consider splitting index.html into index.html, app.js, and app.css while preserving functionality.
+Request:
 
-3. Improved Auth Experience
-Automatically redirect to Cognito Hosted UI on 401 (expired tokens).
+{
+  subscription: { ...PushSubscription... },
+  userAgent: "Chrome ..."
+}
 
-Replace the composer and empty-state view with a friendly signed-out splash screen when no valid token is present.
+POST /api/notifications/unsubscribe
 
-4. Question History View
-Offer a dedicated sidebar or page listing past questions.
+Removes a device subscription.
 
-Allow users to click a past question to focus on its thread (question + answers only).
+POST /api/prompts
 
-License
-This is a private, personal project.
+Returns AI-generated conversation prompts via Bedrock (Claude Haiku).
 
-It is not licensed for redistribution or commercial use without explicit permission.
+Other Endpoints
+
+All documented in circles-api-handler.js:
+
+/api/circles/config
+
+/api/circles/tags
+
+/api/circles/members
+
+/api/circles/.../invitations
+
+7. Backend Event Processing
+
+Circles uses a two-stage event model:
+
+Stage 1 — Message Creation (API Lambda)
+
+When a question or answer is posted:
+
+Lambda writes to Messages DynamoDB
+
+Determines event type:
+
+NEW_QUESTION
+
+NEW_ANSWER
+
+Builds fan-out event:
+
+{
+  type: "NEW_ANSWER",
+  circleId: "...",
+  circleName: "...",
+  questionId: "...",
+  actorUserId: "user-id-of-poster",
+  questionPreview: "Short snippet…"
+}
+
+
+Sends JSON to SQS PushEventQueue
+
+Stage 2 — Push Notification Delivery (PushSender Lambda)
+
+PushSender:
+
+Receives SQS messages
+
+Queries CircleNotificationSubscriptions for all circle members
+
+Filters out:
+
+the actor (poster)
+
+users with no subscriptions
+
+Constructs WebPush payload
+
+Uses web-push and VAPID keys to deliver browser notifications
+
+Example payload:
+
+{
+  title: "New answer in devteam",
+  body: "Scott replied: 'Here’s my thought…'",
+  circleId: "devteam",
+  url: "/?circleId=devteam"
+}
+
+
+The service worker displays the notification and handles tap-to-open behavior.
+
+8. Push Notification System
+Flow
+
+User clicks Enable Notifications
+
+Browser prompts for permission
+
+Service worker registers
+
+Browser creates a PushSubscription (VAPID public key)
+
+SPA POSTs subscription to backend
+
+Backend stores subscription
+
+Future events fan out to all devices
+
+Service Worker Responsibilities
+
+Handle "push" events
+
+Parse payload
+
+Display system notification
+
+Handle "notificationclick" to open correct circle
+
+9. Frontend Logic & State Model
+Circle State
+
+Selected circle stored in localStorage
+
+Questions and answers tracked client-side
+
+UI shows most recent question and optionally older ones
+
+Authentication State
+
+Tokens stored in localStorage
+
+Automatic redirect to Cognito Hosted UI on token expiration
+
+Invite State
+
+Temporary invite tokens stored in localStorage as pending_invite
+
+10. Security Model
+
+Authentication: Cognito Hosted UI + ID Token (JWT)
+
+Authorization:
+
+Lambda validates JWT on all protected routes
+
+Circle membership is verified before message access
+
+Push notifications delivered only to circle members
+
+Data Integrity:
+
+Only questions can omit questionId
+
+Answers always linked to a question
+
+Service Worker Isolation
+
+SW served from top-level origin
+
+Cannot access cookies or non-explicit JS context
+
+11. Operational Considerations
+Logging
+
+circles-api-handler.js logs major API actions
+
+push-sender.js logs:
+
+Module load diagnostics
+
+Subscription lookup
+
+Delivery attempts and failures
+
+Error Handling
+
+SQS retry semantics ensure delivery attempts are retried
+
+Dead-letter queue can be added (future iteration)
+
+Browser Considerations
+
+Chrome desktop and Android supported
+
+iOS Safari push supported when installed as PWA
+
+VAPID Key Rotation
+
+Keys stored in environment variables
+
+Can rotate without redeploying entire stack (only rerunning CDK with new env vars)
+
+12. Product Vision
+
+See full product vision here:
+https://scott.behrens-hub.com/circles/circles-product-vision.html
+
+13. Roadmap
+
+Current and future releases documented here:
+https://scott.behrens-hub.com/circles/circles-roadmap.html
+
+14. Regression Test Plan
+
+Full test coverage and scenarios available here:
+https://scott.behrens-hub.com/circles/circles_regression_test_plan.html
+
+15. License
+
+Private / personal project (not licensed for general reuse).

@@ -322,6 +322,50 @@ async function enqueueNewQuestionPushEvent(params) {
   }
 }
 
+async function enqueueNewAnswerPushEvent(params) {
+  if (!PUSH_EVENTS_QUEUE_URL) {
+    console.warn(
+      "PUSH_EVENTS_QUEUE_URL is not configured; skipping push event enqueue"
+    );
+    return;
+  }
+
+  const preview = (params.answerText || "").slice(0, 140);
+
+  const messageBody = JSON.stringify({
+    type: "NEW_ANSWER",
+    circleId: params.circleId,
+    circleName: params.circleName,
+    questionId: params.questionId,   // the question this answer belongs to
+    answerId: params.answerId,       // the messageId of the answer
+    answerPreview: preview,
+    actorUserId: params.actorUserId, // the user who posted the answer
+  });
+
+  const cmd = new SendMessageCommand({
+    QueueUrl: PUSH_EVENTS_QUEUE_URL,
+    MessageBody: messageBody,
+  });
+
+  try {
+    const result = await sqsClient.send(cmd);
+    console.log("Enqueued NEW_ANSWER push event", {
+      messageId: result.MessageId,
+      circleId: params.circleId,
+      questionId: params.questionId,
+      answerId: params.answerId,
+    });
+  } catch (err) {
+    console.error("Failed to enqueue NEW_ANSWER push event", {
+      error: err,
+      circleId: params.circleId,
+      questionId: params.questionId,
+      answerId: params.answerId,
+    });
+    // Do not fail the API if enqueue fails
+  }
+}
+
 
 // -------------------------
 // Email helper: send invitation email via SES
@@ -978,7 +1022,7 @@ Generate ${count} short, engaging conversation prompts for this private circle o
 Each prompt should:
 - Be 1–2 sentences max.
 - Be warm and curious, not cheesy.
-- Be suitable for older kids and adults (late PG-13), avoiding obviously sensitive topics (politics, explicit content, traumatic events) unless the tags clearly indicate a support context, in which case keep things very gentle and optional.
+- Be suitable for older kids and adults (late PG-13), avoiding obviously sensitive topics (politics, explicit content, traumatic events) unless the tags clearly indicate a political or support context, in which case keep things very gentle and optional.
 - Focus on reflection, memories, gentle check-ins, or light future plans.
 
 Return ONLY a JSON array of strings.
@@ -1724,7 +1768,31 @@ exports.handler = async (event) => {
           // Helper already logs errors; this catch is purely defensive
           console.error("Unexpected error calling enqueueNewQuestionPushEvent:", e);
         }
+      } else if (messageType !== "question" && item.questionId) {
+        // New answer → notify circle members about the answer
+        try {
+          await enqueueNewAnswerPushEvent({
+            circleId: familyId,
+            circleName: familyId,
+            questionId: item.questionId, // the question this answer belongs to
+            answerId: messageId,         // this message is the answer
+            answerText: text,
+            actorUserId: userId,
+          });
+        } catch (e) {
+          console.error("Unexpected error calling enqueueNewAnswerPushEvent:", e);
+        }
       }
+
+      return makeResponse(201, {
+        message: "Message created",
+        item,
+        user: {
+          author,
+          userId,
+          claims: jwtClaims || undefined,
+        },
+      });
 
       return makeResponse(201, {
         message: "Message created",
