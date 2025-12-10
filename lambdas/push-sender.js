@@ -13,6 +13,7 @@ const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
 const {
   DynamoDBDocumentClient,
   QueryCommand,
+  ScanCommand,
 } = require("@aws-sdk/lib-dynamodb");
 
 const ddbClient = new DynamoDBClient({});
@@ -136,9 +137,13 @@ async function getTargetUserIdsForNewQuestion(circleId, actorUserId) {
 
   try {
     const resp = await ddb.send(
-      new QueryCommand({
+      new ScanCommand({
         TableName: membersTableName,
-        KeyConditionExpression: 'circleId = :c',
+        // Filter by circleId, regardless of the table's key schema
+        FilterExpression: '#c = :c',
+        ExpressionAttributeNames: {
+          '#c': 'circleId',
+        },
         ExpressionAttributeValues: {
           ':c': circleId,
         },
@@ -149,13 +154,13 @@ async function getTargetUserIdsForNewQuestion(circleId, actorUserId) {
     console.log(`Loaded ${members.length} members for circle`, circleId);
 
     const userIds = members
-      .map(m => m.userId)
-      .filter(userId => !!userId && userId !== actorUserId);
+      .map((m) => m.userId)
+      .filter((userId) => !!userId && userId !== actorUserId);
 
     // Deduplicate in case any user appears twice
     const uniqueUserIds = Array.from(new Set(userIds));
     console.log(
-      'Target userIds for NEW_QUESTION (excluding actor):',
+      'Target userIds for NEW_QUESTION/NEW_ANSWER (excluding actor):',
       uniqueUserIds
     );
 
@@ -165,6 +170,7 @@ async function getTargetUserIdsForNewQuestion(circleId, actorUserId) {
     return [];
   }
 }
+
 
 
 /**

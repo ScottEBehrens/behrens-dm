@@ -791,6 +791,7 @@
     const circleSelect = document.getElementById('circleSelect');
     const newCircleButton = document.getElementById('newCircleButton'); 
     const notificationsButton = document.getElementById('notificationsButton');
+    const analyticsLink = document.getElementById('analytics-link'); 
 
     const createCircleForm = document.getElementById('createCircleForm');
     const createCircleNameInput = document.getElementById('createCircleName');
@@ -821,6 +822,7 @@
     const analyticsSection = document.getElementById('analytics-section');
     const analyticsSummary = document.getElementById('analytics-summary');
     const analyticsMembers = document.getElementById('analytics-members');
+    const analyticsFooterLink = document.getElementById('analytics-link');
 
     const signedInMain = document.getElementById('signed-in-main');
     const signedOutSplash = document.getElementById('signed-out-splash');
@@ -2195,6 +2197,7 @@
       if (analyticsSection) analyticsSection.style.display = 'none';
       if (tabMessages) tabMessages.classList.add('active');
       if (tabAnalytics) tabAnalytics.classList.remove('active');
+      if (analyticsFooterLink) analyticsFooterLink.textContent = 'Analytics';
       setDebug('Switched to Messages view');
     }
 
@@ -2203,6 +2206,7 @@
       if (analyticsSection) analyticsSection.style.display = '';
       if (tabMessages) tabMessages.classList.remove('active');
       if (tabAnalytics) tabAnalytics.classList.add('active');
+      if (analyticsFooterLink) analyticsFooterLink.textContent = 'Messages';
       setDebug('Switched to Analytics view');
       await loadStats();
     }
@@ -2215,9 +2219,26 @@
 
       questionsShownCount = 1;     // reset view for new circle
       currentQuestionId = null;
+      resetCircleDependentUi();  
 
       loadMessages().catch(console.error);
     });
+
+    if (analyticsFooterLink) {
+      analyticsFooterLink.addEventListener('click', (e) => {
+        e.preventDefault();
+
+        // Toggle based on whether analytics is currently visible
+        if (analyticsSection && analyticsSection.style.display !== 'none') {
+          // Currently on Analytics → go back to Messages
+          showMessagesView();
+        } else {
+          // Currently on Messages → go to Analytics
+          showAnalyticsView();
+        }
+      });
+    }
+
 
 
     // // Reload messages when the selected circle changes
@@ -2380,25 +2401,6 @@
           }
         });
     });
-  </script>
-
-  <!-- Small helper to toggle analytics from footer link -->
-  <script>
-    const analyticsLink = document.getElementById('analytics-link');
-    if (analyticsLink) {
-      analyticsLink.addEventListener('click', (e) => {
-        e.preventDefault();
-        if (typeof showAnalyticsView === 'function' && typeof showMessagesView === 'function') {
-          const section = document.getElementById('analytics-section');
-          const visible = section && section.style.display !== 'none';
-          if (visible) {
-            showMessagesView();
-          } else {
-            showAnalyticsView();
-          }
-        }
-      });
-    }
   </script>
 </body>
 </html>

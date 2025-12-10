@@ -1,429 +1,315 @@
-Circles — Serverless Family Messaging Platform
+# Circles — Serverless Family Messaging Platform  
+_A lightweight, AWS-native messaging system for small, trusted groups._
 
-A lightweight, AWS-native, privacy-focused messaging system designed for families and small groups.
+Circles is a private, installable Progressive Web App (PWA) backed by a fully serverless AWS architecture.  
+It provides fast, low-friction daily communication for families and small groups through:
 
-This repository contains the complete backend and frontend implementation of Circles, including infrastructure as code (AWS CDK), Lambda functions, API Gateway routing, DynamoDB schemas, a PWA frontend, and the full push-notification system (web push with VAPID + SQS fan-out).
+- Lightweight question/answer interactions  
+- Push notifications (Web Push + VAPID)  
+- Secure authentication via Cognito Hosted UI  
+- Invite-based onboarding with SES email support  
+- A modern, offline-capable SPA frontend  
 
-This README provides the engineering-facing documentation for the system.
+This repository contains the complete infrastructure-as-code, backend logic, and frontend implementation.
 
-1. Related Documents
+---
 
-Circles maintains several external documents for product vision, roadmap, architectural detail, and regression testing:
+# 1. External Documentation
 
-Product Vision
-https://scott.behrens-hub.com/circles/circles-product-vision.html
+To avoid duplication, Circles maintains standalone documentation pages that this README links to:
 
-Technical Deep Dive & Architecture Details
-https://scott.behrens-hub.com/circles-technical-deep-dive.html
+- **Product Vision**  
+  https://scott.behrens-hub.com/circles/circles-product-vision.html
 
-Architecture Diagram (PNG)
-https://scott.behrens-hub.com/circles/circles_arch_diagram.png
+- **Architecture Deep Dive (Design + Pseudocode + Sequence Diagrams)**  
+  https://scott.behrens-hub.com/circles-technical-deep-dive.html
 
-Product Roadmap
-https://scott.behrens-hub.com/circles/circles-roadmap.html
+- **Architecture Diagram (PNG)**  
+  https://scott.behrens-hub.com/circles/circles_arch_diagram.png
 
-Regression Test Plan
-https://scott.behrens-hub.com/circles/circles_regression_test_plan.html
+- **Product Roadmap**  
+  https://scott.behrens-hub.com/circles/circles-roadmap.html
 
-2. Architecture Overview
+- **Regression Test Plan**  
+  https://scott.behrens-hub.com/circles/circles_regression_test_plan.html
 
-Circles is implemented as a fully serverless application:
+These documents cover:
+- Vision and goals  
+- Extended SDLC walkthrough  
+- Full architectural increments  
+- Deep implementation details  
+- Planned features and dev backlog  
 
-                        +-----------------------------+
-                        |         CloudFront          |
-                        |  (HTTPS CDN + SPA hosting)  |
-                        +-------------+---------------+
-                                      |
-                                      v
-                        +-----------------------------+
-                        |     S3 Single Page App      |
-                        |   index.html + JS + CSS     |
-                        +-------------+---------------+
-                                      |
-                                      v
-+----------------------+     +-------------------------+      +----------------------------+
-|   Cognito Hosted UI  |<--->|      API Gateway        |----->|   Lambda: circles-api      |
-| OAuth2 / JWT tokens  |     |   /api/... endpoints    |      | Message logic + auth       |
-+----------------------+     +-------------------------+      +----------------------------+
-                                                                      |        |
-                                                                      |        |
-                                                                      v        v
-                                                           +----------------------------+
-                                                           |       DynamoDB Tables      |
-                                                           |  - Circles                 |
-                                                           |  - Messages                |
-                                                           |  - CircleMembers           |
-                                                           |  - InviteTokens            |
-                                                           |  - NotificationSubs        |
-                                                           +----------------------------+
+---
 
-                                      (event fan-out)
-                                              |
-                                              v
-                                    +----------------------+
-                                    |      SQS Queue       |
-                                    | PushEventQueue       |
-                                    +----------+-----------+
-                                               |
-                                               v
-                                    +----------------------+
-                                    |  Lambda: PushSender  |
-                                    |  web-push w/ VAPID   |
-                                    +----------------------+
-                                               |
-                                               v
-                                   Browser → Service Worker → System Notification
+# 2. High-Level Architecture Overview
 
+Circles is fully serverless on AWS:
 
-The frontend is a Progressive Web App, allowing:
+```
+CloudFront → S3 SPA hosting → Browser (PWA)
+           |
+           v
+      API Gateway
+           |
+           v
+     Lambda: circles-api
+           |
+           v
+       DynamoDB Tables
+           - Circles
+           - Messages
+           - CircleMembers
+           - InviteTokens
+           - CircleNotificationSubscriptions
 
-Installable “app-like” experience
+Push Flow:
+circles-api → SQS PushEventQueue → PushSender Lambda → WebPush (VAPID)
+```
 
-Background service worker
+Authentication:
+- Cognito Hosted UI (PKCE)
+- Access/ID tokens stored client-side
+- All protected API routes validate JWTs + circle membership
 
-Push notifications
+Email:
+- SES domain-verified (`behrens-hub.com`)
+- Custom MAIL FROM (`noreply.behrens-hub.com`)
+- Invitation emails used for secure onboarding
+- Sandbox-compatible; production access pending
 
-Local caching and offline support
+Push:
+- WebPush (VAPID)
+- Service worker handles push + tap-to-open
+- Tap opens directly to the correct circle (`/?circleId=xyz`)
 
-3. Infrastructure Components (CDK)
-CloudFront + S3 SPA
+PWA:
+- Installable on mobile/desktop
+- Offline-first caching  
+- Works in iOS Safari when installed as a PWA  
 
-Serves the single-page application.
+---
 
-Handles deep links (/?circleId=...).
+# 3. Infrastructure (AWS CDK)
 
-API Gateway
+This repo contains a full CDK app defining:
 
-Routes authenticated requests to backend Lambdas:
+### CloudFront + S3
+- SPA hosting  
+- Handles deep linking and client-side routing  
 
-/api/circles
+### API Gateway
+Routes:
+- `/api/circles`
+- `/api/circles/members`
+- `/api/circles/tags`
+- `/api/circles/config`
+- `/api/circles/invitations`
+- `/api/notifications/subscribe`
+- `/api/notifications/unsubscribe`
+- `/api/prompts` (Bedrock: Claude Haiku)
 
-/api/circles/tags
+### Lambda Functions
 
-/api/circles/config
+#### `circles-api-handler.js`
+- Core business logic  
+- JWT validation  
+- Circle membership checks  
+- Question/answer creation  
+- Invitation generation & SES email dispatch  
+- Event fan-out to SQS  
 
-/api/circles/members
+#### `push-sender.js`
+- Consumes SQS push events  
+- Looks up subscriptions in DynamoDB  
+- Sends WebPush notifications via VAPID  
+- Handles Chrome, Android, and iOS (PWA)  
 
-/api/circles/invitations
+### DynamoDB Tables
 
-/api/prompts
+| Table                          | Purpose                          | Keys                      |
+|-------------------------------|----------------------------------|---------------------------|
+| **Circles**                   | Circle definitions               | PK: circleId              |
+| **CircleMembers**             | User ↔ Circle mapping            | PK: circleId, SK: userId  |
+| **Messages**                  | Questions & answers              | PK: familyId, SK: ts      |
+| **InviteTokens**              | Secure onboarding/invites        | PK: invitationId          |
+| **CircleNotificationSubscriptions** | Push subscriptions per device | PK: userId, SK: subId     |
 
-/api/notifications/subscribe
+### SQS Queue: `PushEventQueue`
+- Decouples user actions from notification delivery  
+- Supports retries & future DLQ  
 
-/api/notifications/unsubscribe
+### Cognito Hosted UI
+- PKCE Auth Code flow  
+- 12-hour session duration  
+- ID + access tokens validated inside Lambda  
 
-Lambda Functions
+---
 
-circles-api-handler.js
-Core API routing, business logic, message creation, membership validation.
+# 4. Deployment Workflow
 
-push-sender.js
-Consumes SQS push events and sends WebPush payloads.
+All deployments are handled via CDK.
 
-DynamoDB Tables
-Table	Purpose	Key Schema
-Circles	Circle definitions	PK: circleId
-CircleMembers	Users <→ Circles mapping	PK: circleId, SK: userId
-Messages	Questions + answers	PK: familyId, SK: timestamp
-InviteTokens	Invitation system	PK: invitationId
-CircleNotificationSubscriptions	Push subscriptions	PK: userId, SK: subscriptionId
-SQS Queue
-
-PushEventQueue
-Decouples message creation from notification delivery.
-
-Cognito Hosted UI
-
-OAuth2 implicit flow
-
-ID and access tokens stored in localStorage
-
-Tokens validated server-side in Lambda
-
-4. Deployment Model
-
-Deployment is fully performed through AWS CDK.
-
-Deployment Steps
+### Steps:
+```bash
 cd infra/
 npm install
 npm run build
 cdk deploy CirclesStack
+```
 
-Required Environment Variables (values redacted)
-PUSH_VAPID_PUBLIC_KEY=REDACTED
-PUSH_VAPID_PRIVATE_KEY=REDACTED
+### Required Environment Variables
+Values passed into CDK and Lambdas:
+
+```
+PUSH_VAPID_PUBLIC_KEY=...
+PUSH_VAPID_PRIVATE_KEY=...
 PUSH_VAPID_SUBJECT=mailto:you@example.com
+```
 
+These are injected into the PushSender Lambda at deploy time.
 
-These are loaded by CDK from process.env and passed into the PushSender Lambda.
+---
 
-5. Data Model
-Messages Table Structure
-{
-  familyId: "devteam",
-  messageId: "msg_xxx",
-  messageType: "question" | "answer",
-  text: "...",
-  author: "userId",
-  createdAt: "ISO8601",
-  questionId: "msg_abc123"   // for answers only
-}
+# 5. API Summary
 
-
-Rules:
-
-messageType === "question" → no questionId
-
-messageType === "answer" → must include questionId
-
-UI automatically tracks the most recent question per circle
-
-Notification Subscriptions
-{
-  userId: "cognito-sub",
-  subscriptionId: "uuid",
-  endpoint: "https://fcm.googleapis.com/fcm/send/....",
-  p256dh: "...",
-  auth: "...",
-  createdAt: "...",
-  userAgent: "Chrome/123.0..."
-}
-
-
-Users may have multiple subscriptions (desktop, phone, tablet).
-
-6. API Specification
-POST /api/circles
-
+### `POST /api/circles`
 Create a question or answer.
 
 Request:
-
+```json
 {
-  "familyId": "devteam",
-  "text": "What’s your favorite…",
+  "familyId": "mycircle",
+  "text": "What's your favorite…",
   "messageType": "question" | "answer",
-  "questionId": "msg_123"        // answers only
+  "questionId": "msg_123"
 }
-
+```
 
 Response:
+```json
+{ "item": { ... } }
+```
 
+Side effects:
+- Writes message to DynamoDB  
+- Emits NEW_QUESTION or NEW_ANSWER event to SQS  
+
+---
+
+### `POST /api/notifications/subscribe`
+Register a device’s push subscription.
+
+### `POST /api/notifications/unsubscribe`
+Remove a push subscription.
+
+### `POST /api/prompts`
+Generate conversation prompts using Amazon Bedrock.
+
+---
+
+# 6. Event Model
+
+### Stage 1 — API Lambda
+- Saves question/answer  
+- Determines event type  
+- Emits fan-out event to SQS  
+
+Example event:
+```json
 {
-  "item": { ...message object... }
+  "type": "NEW_ANSWER",
+  "circleId": "devteam",
+  "circleName": "Dev Team",
+  "actorUserId": "abc123",
+  "questionId": "msg_abc",
+  "questionPreview": "Short snippet..."
 }
+```
 
-
-A NEW_QUESTION or NEW_ANSWER event is emitted into SQS.
-
-POST /api/notifications/subscribe
-
-Registers a device for push notifications.
-
-Request:
-
-{
-  subscription: { ...PushSubscription... },
-  userAgent: "Chrome ..."
-}
-
-POST /api/notifications/unsubscribe
-
-Removes a device subscription.
-
-POST /api/prompts
-
-Returns AI-generated conversation prompts via Bedrock (Claude Haiku).
-
-Other Endpoints
-
-All documented in circles-api-handler.js:
-
-/api/circles/config
-
-/api/circles/tags
-
-/api/circles/members
-
-/api/circles/.../invitations
-
-7. Backend Event Processing
-
-Circles uses a two-stage event model:
-
-Stage 1 — Message Creation (API Lambda)
-
-When a question or answer is posted:
-
-Lambda writes to Messages DynamoDB
-
-Determines event type:
-
-NEW_QUESTION
-
-NEW_ANSWER
-
-Builds fan-out event:
-
-{
-  type: "NEW_ANSWER",
-  circleId: "...",
-  circleName: "...",
-  questionId: "...",
-  actorUserId: "user-id-of-poster",
-  questionPreview: "Short snippet…"
-}
-
-
-Sends JSON to SQS PushEventQueue
-
-Stage 2 — Push Notification Delivery (PushSender Lambda)
-
-PushSender:
-
-Receives SQS messages
-
-Queries CircleNotificationSubscriptions for all circle members
-
-Filters out:
-
-the actor (poster)
-
-users with no subscriptions
-
-Constructs WebPush payload
-
-Uses web-push and VAPID keys to deliver browser notifications
+### Stage 2 — PushSender Lambda
+- Reads SQS message  
+- Fetches all member subscriptions  
+- Removes sender  
+- Sends notifications using WebPush  
 
 Example payload:
-
+```json
 {
-  title: "New answer in devteam",
-  body: "Scott replied: 'Here’s my thought…'",
-  circleId: "devteam",
-  url: "/?circleId=devteam"
+  "title": "New answer in devteam",
+  "body": "Scott replied: 'Here’s my thought…'",
+  "circleId": "devteam",
+  "url": "/?circleId=devteam"
 }
+```
 
+---
 
-The service worker displays the notification and handles tap-to-open behavior.
+# 7. Frontend Overview (PWA)
 
-8. Push Notification System
-Flow
+### Key features:
+- Installable on iOS/Android/Desktop  
+- Service worker handles caching + push  
+- Maintains local UI state for:
+  - Selected circle  
+  - Latest question  
+  - Question history  
+  - Pending invite tokens  
 
-User clicks Enable Notifications
+### Authentication Flow:
+- Redirect to Cognito Hosted UI  
+- Tokens stored in localStorage  
+- Auto-renew & session extension (12-hour max)  
 
-Browser prompts for permission
+---
 
-Service worker registers
+# 8. Security
 
-Browser creates a PushSubscription (VAPID public key)
+- JWT validation for every protected route  
+- Circle membership enforced server-side  
+- Invite tokens randomized + expiry support  
+- SES sending uses domain-verified identity  
+- Service worker sandboxing prevents unauthorized access  
 
-SPA POSTs subscription to backend
+---
 
-Backend stores subscription
+# 9. Operational Notes
 
-Future events fan out to all devices
+### Logging
+- `circles-api`: Major API actions, membership validations  
+- `push-sender`: Delivery attempts, subscription failures  
 
-Service Worker Responsibilities
+### Error Handling
+- SQS retry semantics  
+- Future: DLQ for failed push deliveries  
 
-Handle "push" events
+### Browser Support
+- Chrome desktop & Android fully supported  
+- iOS Safari supported when installed as a PWA  
+- VAPID key rotation supported  
 
-Parse payload
+---
 
-Display system notification
+# 10. Links
 
-Handle "notificationclick" to open correct circle
+- **Product Vision:**  
+  https://scott.behrens-hub.com/circles/circles-product-vision.html
 
-9. Frontend Logic & State Model
-Circle State
+- **Architecture Deep Dive:**  
+  https://scott.behrens-hub.com/circles-technical-deep-dive.html
 
-Selected circle stored in localStorage
+- **Architecture Diagram:**  
+  https://scott.behrens-hub.com/circles/circles_arch_diagram.png
 
-Questions and answers tracked client-side
+- **Roadmap:**  
+  https://scott.behrens-hub.com/circles/circles-roadmap.html
 
-UI shows most recent question and optionally older ones
+- **Regression Test Plan:**  
+  https://scott.behrens-hub.com/circles/circles_regression_test_plan.html
 
-Authentication State
+---
 
-Tokens stored in localStorage
+# 11. License
 
-Automatic redirect to Cognito Hosted UI on token expiration
-
-Invite State
-
-Temporary invite tokens stored in localStorage as pending_invite
-
-10. Security Model
-
-Authentication: Cognito Hosted UI + ID Token (JWT)
-
-Authorization:
-
-Lambda validates JWT on all protected routes
-
-Circle membership is verified before message access
-
-Push notifications delivered only to circle members
-
-Data Integrity:
-
-Only questions can omit questionId
-
-Answers always linked to a question
-
-Service Worker Isolation
-
-SW served from top-level origin
-
-Cannot access cookies or non-explicit JS context
-
-11. Operational Considerations
-Logging
-
-circles-api-handler.js logs major API actions
-
-push-sender.js logs:
-
-Module load diagnostics
-
-Subscription lookup
-
-Delivery attempts and failures
-
-Error Handling
-
-SQS retry semantics ensure delivery attempts are retried
-
-Dead-letter queue can be added (future iteration)
-
-Browser Considerations
-
-Chrome desktop and Android supported
-
-iOS Safari push supported when installed as PWA
-
-VAPID Key Rotation
-
-Keys stored in environment variables
-
-Can rotate without redeploying entire stack (only rerunning CDK with new env vars)
-
-12. Product Vision
-
-See full product vision here:
-https://scott.behrens-hub.com/circles/circles-product-vision.html
-
-13. Roadmap
-
-Current and future releases documented here:
-https://scott.behrens-hub.com/circles/circles-roadmap.html
-
-14. Regression Test Plan
-
-Full test coverage and scenarios available here:
-https://scott.behrens-hub.com/circles/circles_regression_test_plan.html
-
-15. License
-
-Private / personal project (not licensed for general reuse).
+Private / personal project.  
+Not licensed for general reuse.

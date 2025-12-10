@@ -32,11 +32,35 @@ export class CirclesStack extends Stack {
     const domainRoot = 'behrens-hub.com';
     const circlesSubdomain = 'circles';
     const circlesDomain = `${circlesSubdomain}.${domainRoot}`;
+    const mailFromSubdomain = 'noreply';
 
     // --- Hosted Zone (reuse your existing zone) ---
     const hostedZone = route53.HostedZone.fromLookup(this, 'CirclesHostedZone', {
       domainName: domainRoot,
     });
+
+    // // --- SES MAIL FROM DNS Records (noreply.behrens-hub.com) ---
+    // new route53.MxRecord(this, 'MailFromMxRecord', {
+    //   zone: hostedZone,
+    //   // "noreply.behrens-hub.com" -> just the label here
+    //   recordName: mailFromSubdomain,
+    //   values: [
+    //     {
+    //       priority: 10,
+    //       hostName: 'feedback-smtp.us-east-1.amazonses.com',
+    //     },
+    //   ],
+    //   ttl: Duration.minutes(5),
+    // });
+
+    // new route53.TxtRecord(this, 'MailFromSpfRecord', {
+    //   zone: hostedZone,
+    //   recordName: mailFromSubdomain,
+    //   values: [
+    //     'v=spf1 include:amazonses.com ~all',
+    //   ],
+    //   ttl: Duration.minutes(5),
+    // });
 
     // --- ACM Certificate (must be in us-east-1 for CloudFront) ---
     const cert = new acm.DnsValidatedCertificate(this, 'CirclesCert', {
@@ -48,7 +72,8 @@ export class CirclesStack extends Stack {
     // --- SES Domain Identity ---
     // This verifies behrens-hub.com and configures MAIL FROM = noreply.behrens-hub.com
     new EmailIdentity(this, "CirclesDomainIdentity", {
-      identity: Identity.domain(domainRoot),
+      // Tie SES directly to your Route 53 public hosted zone
+      identity: Identity.publicHostedZone(hostedZone),
       mailFromDomain: `noreply.${domainRoot}`,
     });
 
@@ -300,6 +325,10 @@ export class CirclesStack extends Stack {
       supportedIdentityProviders: [
         cognito.UserPoolClientIdentityProvider.COGNITO,
       ],
+      accessTokenValidity: Duration.hours(12),
+      idTokenValidity: Duration.hours(12),
+      refreshTokenValidity: Duration.days(30),
+      enableTokenRevocation: true,   // good hygiene
     });
 
     const userPoolDomain = userPool.addDomain('CirclesUserPoolDomain', {
