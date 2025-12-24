@@ -780,6 +780,86 @@
     const LS_SELECTED_CIRCLE_KEY = 'circles_selected_circle';
     const LS_PENDING_INVITE_KEY = 'circles_pending_invite';
 
+
+    // In-memory auth state (never persist tokens in localStorage)
+    let MEM_ID_TOKEN = null;
+    let MEM_ACCESS_TOKEN = null;
+    let MEM_USER_CLAIMS = null;
+
+    async function refreshAccessToken() {
+      try {
+        const res = await fetch('/auth/token', { method: 'POST', credentials: 'include' });
+        if (!res.ok) return null;
+        const data = await res.json().catch(() => ({}));
+
+        MEM_ACCESS_TOKEN = data && data.access_token ? String(data.access_token) : null;
+        MEM_ID_TOKEN = data && data.id_token ? String(data.id_token) : null;
+
+        // Keep display claims fresh (decode id token if present)
+        if (MEM_ID_TOKEN) {
+          const claims = decodeJwt(MEM_ID_TOKEN);
+          if (claims) MEM_USER_CLAIMS = claims;
+        }
+
+        return MEM_ID_TOKEN || MEM_ACCESS_TOKEN;
+      } catch (e) {
+        console.warn('refreshAccessToken failed', e);
+        return null;
+      }
+    }
+
+    async function loadMe() {
+      // /auth/me expects a bearer token; access token is fine
+      if (!MEM_ACCESS_TOKEN) return null;
+      try {
+        const res = await fetch('/auth/me', {
+          method: 'GET',
+          credentials: 'include',
+          headers: { 'Authorization': 'Bearer ' + MEM_ACCESS_TOKEN }
+        });
+        if (!res.ok) return null;
+        const data = await res.json().catch(() => ({}));
+        if (data && data.claims) MEM_USER_CLAIMS = data.claims;
+        return data;
+      } catch (e) {
+        console.warn('loadMe failed', e);
+        return null;
+      }
+    }
+
+    async function fetchWithAuth(url, options = {}, retry = true) {
+      if (!MEM_ID_TOKEN && !MEM_ACCESS_TOKEN) {
+        await refreshAccessToken();
+      }
+
+      const headers = new Headers(options.headers || {});
+      const bearer = MEM_ID_TOKEN || MEM_ACCESS_TOKEN;
+      if (bearer) headers.set('Authorization', 'Bearer ' + bearer);
+
+      const opts = { ...options, headers, credentials: options.credentials || 'include' };
+      const res = await fetch(url, opts);
+
+      if (res.status === 401 && retry) {
+        MEM_ID_TOKEN = null;
+        MEM_ACCESS_TOKEN = null;
+        await refreshAccessToken();
+        return fetchWithAuth(url, options, false);
+      }
+
+      return res;
+    }
+
+    async function bootstrapAuth() {
+      await refreshAccessToken();
+      if (MEM_ACCESS_TOKEN) {
+        await loadMe();
+      }
+      // Clear any legacy implicit-flow fragments
+      if (window.location.hash && (window.location.hash.includes('id_token') || window.location.hash.includes('access_token'))) {
+        window.location.hash = '';
+      }
+    }
+
     const statusPill = document.getElementById('statusPill');
     const debugStatus = document.getElementById('debugStatus');
     const messagesEl = document.getElementById('messages');
@@ -907,36 +987,24 @@
     }
 
     function setTokens(idToken, accessToken) {
-      if (idToken) {
-        localStorage.setItem(LS_ID_TOKEN_KEY, idToken);
-        const claims = decodeJwt(idToken);
-        if (claims) {
-          localStorage.setItem(LS_USER_CLAIMS_KEY, JSON.stringify(claims));
-        }
-      }
-      if (accessToken) {
-        localStorage.setItem(LS_ACCESS_TOKEN_KEY, accessToken);
-      }
-    }
+      // Do NOT persist tokens in localStorage.
+      MEM_ID_TOKEN = idToken ? String(idToken) : null;
+      MEM_ACCESS_TOKEN = accessToken ? String(accessToken) : null;
 
-    function clearTokens() {
-      localStorage.removeItem(LS_ID_TOKEN_KEY);
-      localStorage.removeItem(LS_ACCESS_TOKEN_KEY);
-      localStorage.removeItem(LS_USER_CLAIMS_KEY);
+      // Keep MEM_USER_CLAIMS in sync if we have an id token
+      if (MEM_ID_TOKEN) {
+        const claims = decodeJwt(MEM_ID_TOKEN);
+        if (claims) MEM_USER_CLAIMS = claims;
+      }
     }
 
     function getIdToken() {
-      return localStorage.getItem(LS_ID_TOKEN_KEY);
+      // Prefer ID token for API Gateway authorizer; fall back to access token
+      return MEM_ID_TOKEN || MEM_ACCESS_TOKEN;
     }
 
     function getUserClaims() {
-      const raw = localStorage.getItem(LS_USER_CLAIMS_KEY);
-      if (!raw) return null;
-      try {
-        return JSON.parse(raw);
-      } catch {
-        return null;
-      }
+      return MEM_USER_CLAIMS;
     }
 
     // Pending invite helpers
@@ -1499,12 +1567,24 @@
     }
 
     function login() {
-      const url = new URL(COGNITO_HOSTED_UI + '/oauth2/authorize');
-      url.searchParams.set('client_id', COGNITO_CLIENT_ID);
-      url.searchParams.set('response_type', 'token'); // implicit flow
-      url.searchParams.set('scope', COGNITO_SCOPE);
-      url.searchParams.set('redirect_uri', REDIRECT_URI);
-      window.location.href = url.toString();
+      // PKCE + refresh-cookie flow lives on the backend
+      window.location.href = '/auth/login';
+    }
+
+    function clearTokens() {
+      // Clear in-memory tokens/claims
+      MEM_ID_TOKEN = null;
+      MEM_ACCESS_TOKEN = null;
+      MEM_USER_CLAIMS = null;
+
+      // Clean up any legacy localStorage tokens from older builds (best-effort)
+      try {
+        localStorage.removeItem(LS_ID_TOKEN_KEY);
+        localStorage.removeItem(LS_ACCESS_TOKEN_KEY);
+        localStorage.removeItem(LS_USER_CLAIMS_KEY);
+      } catch (e) {
+        // ignore
+      }
     }
 
     function maybeHandleExpiredToken(res, data, contextLabel) {
@@ -1530,11 +1610,16 @@
 
 
     function logout() {
+      // Clear local UI state
       clearTokens();
-      const url = new URL(COGNITO_HOSTED_UI + '/logout');
-      url.searchParams.set('client_id', COGNITO_CLIENT_ID);
-      url.searchParams.set('logout_uri', REDIRECT_URI);
-      window.location.href = url.toString();
+
+      // Best-effort server-side cookie clear
+      fetch('/auth/logout', { method: 'POST', credentials: 'include' })
+        .catch(() => {})
+        .finally(() => {
+          // Return to app root
+          window.location.href = '/';
+        });
     }
 
     // === Invite + members + prompts visibility ===
@@ -2380,26 +2465,33 @@
       }
 
       // 2) Parse any Cognito tokens from hash
-      parseTokensFromHash();
-      updateAuthUi();
+      (async () => {
+        try {
+          await bootstrapAuth();
+        } catch (e) {
+          console.warn('bootstrapAuth failed', e);
+        }
 
-      // 3) Load allowed circles, then restore selection and messages, then try to accept pending invite
-      loadUserCircles()
-        .catch(err => {
-          console.error(err);
-        })
-        .finally(() => {
-          // Even if config fails, fall back to whatever is in the <select>
-          restoreSelectedCircle();
-          updateInviteSectionVisibility();
-          showMessagesView();
-          loadMessages().catch(console.error);
-          // If there's a pending invite and we're signed in, accept it
-          maybeAcceptPendingInvite().catch(console.error);
-          if (notificationsButton && browserSupportsPushNotifications()) {
-            refreshNotificationsButtonState().catch(console.error);
-          }
-        });
+        updateAuthUi();
+
+        // 3) Load allowed circles, then restore selection and messages, then try to accept pending invite
+        loadUserCircles()
+          .catch(err => {
+            console.error(err);
+          })
+          .finally(() => {
+            // Even if config fails, fall back to whatever is in the <select>
+            restoreSelectedCircle();
+            updateInviteSectionVisibility();
+            showMessagesView();
+            loadMessages().catch(console.error);
+            // If there's a pending invite and we're signed in, accept it
+            maybeAcceptPendingInvite().catch(console.error);
+            if (notificationsButton && browserSupportsPushNotifications()) {
+              refreshNotificationsButtonState().catch(console.error);
+            }
+          });
+      })();
     });
   </script>
 </body>

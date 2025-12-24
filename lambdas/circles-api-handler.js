@@ -1019,11 +1019,26 @@ async function handleGeneratePrompts(event, context) {
   const baseInstruction = `
 Generate ${count} short, engaging conversation prompts for this private circle of families or close friends.
 
-Each prompt should:
-- Be 1–2 sentences max.
-- Be warm and curious, not cheesy.
-- Be suitable for older kids and adults (late PG-13), avoiding obviously sensitive topics (politics, explicit content, traumatic events) unless the tags clearly indicate a political or support context, in which case keep things very gentle and optional.
-- Focus on reflection, memories, gentle check-ins, or light future plans.
+Each prompt must:
+- Be 1–2 sentences maximum.
+- Feel warm, curious, natural, easy, inviting.
+- Be suitable for older kids and adults (late PG-13).
+- Favor light preferences, interests, fun memories, everyday moments, simple hypotheticals, trivia-style questions, or gentle check-ins.
+- Favor concrete, everyday, low-stakes questions drawn from daily life, habits, preferences, and simple memories.
+- Avoid cheesy, preachy, clever, emotionally heavy, deeply reflective
+- Avoid time-consuming questions unless explicitly instructed otherwise by tone tags.
+- Avoid questions that would reasonably take more than 30 seconds to think about before responding.
+- Avoid aspirational or idealized questions (such as dream vacations, bucket lists, or future goals).
+- Avoid sensitive topics (politics, explicit content, traumatic events) unless the tags clearly indicate a political or support context; in those cases, keep prompts gentle, respectful, and always optional.
+- avoid anything that feels like journaling, self-analysis, or emotional processing
+
+Style reference:
+- Prompts should resemble classic "get to know you" question lists that circulated via email or early social media—simple, friendly, everyday questions that people can answer instantly without overthinking.
+
+Tone guidance:
+- Default to lighthearted, low-effort prompts that can be answered quickly.
+- Only generate deep or emotionally reflective prompts if the "deep_thought" tone tag is explicitly present.
+- When in doubt, choose simplicity and ease over depth.
 
 Return ONLY a JSON array of strings.
 For example:

@@ -17,6 +17,7 @@ import * as cognito from 'aws-cdk-lib/aws-cognito';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as sqs from 'aws-cdk-lib/aws-sqs';
 import * as lambdaEventSources from 'aws-cdk-lib/aws-lambda-event-sources';
+import * as path from 'path';
 
 import * as dotenv from 'dotenv';
 dotenv.config({ path: '../.env.private' });
@@ -312,21 +313,22 @@ export class CirclesStack extends Stack {
       generateSecret: false, // SPA / static front-end
       oAuth: {
         flows: {
-          implicitCodeGrant: true, // enables id_token in URL fragment
+          authorizationCodeGrant: true,
+          //implicitCodeGrant: true, // enables id_token in URL fragment
         },
         scopes: [
           cognito.OAuthScope.OPENID,
           cognito.OAuthScope.EMAIL,
           cognito.OAuthScope.PROFILE,
         ],
-        callbackUrls: ['https://circles.behrens-hub.com/'],
+        callbackUrls: ['https://circles.behrens-hub.com/auth/callback'],
         logoutUrls: ['https://circles.behrens-hub.com/'],
       },
       supportedIdentityProviders: [
         cognito.UserPoolClientIdentityProvider.COGNITO,
       ],
-      accessTokenValidity: Duration.hours(12),
-      idTokenValidity: Duration.hours(12),
+      accessTokenValidity: Duration.hours(1),
+      idTokenValidity: Duration.hours(1),
       refreshTokenValidity: Duration.days(30),
       enableTokenRevocation: true,   // good hygiene
     });
@@ -338,7 +340,37 @@ export class CirclesStack extends Stack {
     });
 
     // userPoolDomain.domainName is already the full Cognito domain host
-    const hostedUiBaseUrl = `https://${userPoolDomain.domainName}`;
+    // const hostedUiBaseUrl = `https://${userPoolDomain.domainName}`;
+
+    // domainPrefix is what CDK is giving you right now
+    const domainPrefix = userPoolDomain.domainName; // currently "circles-behrens-hub"
+    const cognitoHostedUiHost = `${domainPrefix}.auth.${Stack.of(this).region}.amazoncognito.com`;
+    const hostedUiBaseUrl = `https://${cognitoHostedUiHost}`;
+
+    // NEW: auth handler lambda
+    const circlesAuthHandler = new lambda.Function(this, 'CirclesAuthHandler', {
+      functionName: 'circles-auth-handler',
+      runtime: lambda.Runtime.NODEJS_20_X,
+      handler: 'circles-auth-handler.handler',
+      code: lambda.Code.fromAsset(path.join(__dirname, '../../lambdas')),
+      timeout: Duration.seconds(10),
+      memorySize: 256,
+      environment: {
+        COGNITO_DOMAIN: hostedUiBaseUrl,
+        COGNITO_CLIENT_ID: userPoolClient.userPoolClientId,
+        COGNITO_REDIRECT_URI: 'https://circles.behrens-hub.com/auth/callback',
+        FRONTEND_BASE_URL: 'https://circles.behrens-hub.com/',
+        COOKIE_SAMESITE: 'Lax',
+        // COOKIE_DOMAIN: 'circles.behrens-hub.com', // leave off unless you need it
+      },
+    });
+
+    // NEW: /auth proxy to auth handler
+    const authResource = api.root.addResource('auth');
+    authResource.addProxy({
+      defaultIntegration: new apigateway.LambdaIntegration(circlesAuthHandler),
+      anyMethod: true,
+    });
 
     // --- API Gateway Cognito Authorizer ---
     const authorizer = new apigateway.CognitoUserPoolsAuthorizer(this, 'CirclesAuthorizer', {
@@ -473,6 +505,13 @@ export class CirclesStack extends Stack {
           origin: apiOrigin,
           viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
           cachePolicy: apiCachePolicy,
+          allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
+          originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+        },
+        'auth/*': {
+          origin: apiOrigin,
+          viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+          cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
           allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
           originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
         },
